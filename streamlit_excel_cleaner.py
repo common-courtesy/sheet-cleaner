@@ -94,7 +94,7 @@ def clean_file(uploaded_file):
             preview = pd.read_csv(uploaded_file, nrows=1, header=None)
             uploaded_file.seek(0)  # rewind after preview read
             if "Common Courtesy" in str(preview.iloc[0, 1]):
-                df = pd.read_csv(uploaded_file, header=5)
+                df = pd.read_csv(uploaded_file, header=4)
                 is_common_courtesy = True
                 if 'Guest First Name' in df.columns:
                     df['First Name'] = df['Guest First Name']
