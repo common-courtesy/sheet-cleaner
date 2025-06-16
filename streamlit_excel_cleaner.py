@@ -139,7 +139,7 @@ def clean_file(uploaded_file):
         if missing_cols:
             return None
 
-        df_filtered = df[df[note_column].isin(internal_note_values)]
+        df_filtered = df[df[note_column].notna() & (df[note_column].astype(str).str.strip() != "")]
         custom_columns_to_hide = columns_to_hide.copy()
         if is_common_courtesy and "Email" in custom_columns_to_hide:
             custom_columns_to_hide.remove("Email")
