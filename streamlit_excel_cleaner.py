@@ -83,6 +83,18 @@ def clean_and_group(df):
 
     return pd.DataFrame(all_rows)
 
+def detect_header(uploaded_file):
+    uploaded_file.seek(0)
+    for idx in [4, 5]:
+        try:
+            df = pd.read_csv(uploaded_file, header=idx, nrows=1)
+            if any("trip/eats id" in col.lower() for col in df.columns):
+                uploaded_file.seek(0)
+                return idx
+        except Exception:
+            pass
+        uploaded_file.seek(0)
+    return None
 
 def clean_file(uploaded_file):
     try:
@@ -94,8 +106,17 @@ def clean_file(uploaded_file):
             preview = pd.read_csv(uploaded_file, nrows=1, header=None)
             uploaded_file.seek(0)  # rewind after preview read
             if "Common Courtesy" in str(preview.iloc[0, 1]):
-                df = pd.read_csv(uploaded_file, header=4)
+                header_row = detect_header(uploaded_file)
+                if header_row is not None:
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file, header=header_row)
+                else:
+                    print("❌ Could not detect header row — fallback to default read")
+                    uploaded_file.seek(0)
+                    df = pd.read_csv(uploaded_file)
+
                 is_common_courtesy = True
+
                 if 'Guest First Name' in df.columns:
                     df['First Name'] = df['Guest First Name']
                 if 'Guest Last Name' in df.columns:
