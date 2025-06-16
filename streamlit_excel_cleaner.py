@@ -230,7 +230,6 @@ def clean_file(uploaded_file):
         print("Error:", e)
         return None
 
-
 # --- Streamlit UI ---
 st.set_page_config(page_title="Monthly Report Tool", layout="centered")
 st.title("📊 Monthly Report Tool")
@@ -273,25 +272,25 @@ def sort_and_merge(file1_path, file2_path):
             preview = pd.read_csv(file_obj, nrows=1, header=None)
             file_obj.seek(0)  # 🔁 Must reset again before full read
             if "Common Courtesy" in str(preview.iloc[0, 1]):
-                file_obj.seek(0)
                 df = pd.read_csv(file_obj, header=4)
             else:
-                file_obj.seek(0)
                 df = pd.read_csv(file_obj)
         else:
-            file_obj.seek(0)
             df = pd.read_excel(file_obj)
 
-        df_filtered = df[df['Internal Note'].isin(internal_note_values)]
-        df_filtered['Last Name'] = df_filtered['Last Name'].astype(str).str.strip()
-        df_filtered['First Name'] = df_filtered['First Name'].astype(str).str.strip()
-        df_filtered['Passenger Number'] = df_filtered['Passenger Number'].astype(str).str.strip()
+        # Strip whitespace from key columns
+        df['Last Name'] = df['Last Name'].astype(str).str.strip()
+        df['First Name'] = df['First Name'].astype(str).str.strip()
+        df['Passenger Number'] = df['Passenger Number'].astype(str).str.strip()
 
-        return df_filtered.sort_values(
+        # ✅ Remove rows where Internal Note is empty or NaN
+        if 'Internal Note' in df.columns:
+            df = df[df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
+
+        return df.sort_values(
             by=['Last Name', 'First Name', 'Passenger Number'],
             key=lambda col: col.str.lower() if col.dtype == 'object' else col
         )
-
 
     df1 = clean_and_sort(file1_path)
     df2 = clean_and_sort(file2_path)
@@ -363,20 +362,14 @@ def split_by_internal_note(df):
     if 'Internal Note' not in df.columns:
         return {}
 
-    for note in internal_note_values:
-        df_note = df[df['Internal Note'] == note].copy()
-        if df_note.empty:
-            continue
+    df['Last Name'] = df['Last Name'].astype(str).str.strip()
+    df['First Name'] = df['First Name'].astype(str).str.strip()
+    df['Passenger Number'] = df['Passenger Number'].astype(str).str.strip()
 
-        df_note['Last Name'] = df_note['Last Name'].astype(str).str.strip()
-        df_note['First Name'] = df_note['First Name'].astype(str).str.strip()
-        df_note['Passenger Number'] = df_note['Passenger Number'].astype(str).str.strip()
+    known_df = df[df['Internal Note'].isin(internal_note_values)]
+    other_df = df[~df['Internal Note'].isin(internal_note_values) & df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
 
-        df_note = df_note.sort_values(
-            by=['Last Name', 'First Name', 'Passenger Number'],
-            key=lambda col: col.str.lower() if col.dtype == 'object' else col
-        ).reset_index(drop=True)
-
+    def group_and_export(df_note):
         all_rows = []
         group_rows = []
         current_key = None
@@ -384,7 +377,6 @@ def split_by_internal_note(df):
         for i in range(len(df_note)):
             row = df_note.iloc[i]
             group_key = (row['Passenger Number'], row['Last Name'], row['First Name'])
-
             is_last_row = (i == len(df_note) - 1)
 
             if current_key is None:
@@ -393,18 +385,14 @@ def split_by_internal_note(df):
             if group_key != current_key:
                 group_df = pd.DataFrame(group_rows)
                 group_df["Trips Count"] = 1
-                group_df["Trips Count"] = group_df["Trips Count"].astype(int)
                 all_rows.extend(group_df.to_dict(orient="records"))
-
                 transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
                 total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
                 totals_row = {col: "" for col in group_df.columns}
                 totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
                 totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
                 all_rows.append(totals_row)
                 all_rows.append({col: "" for col in group_df.columns})
-
                 group_rows = []
 
             group_rows.append(row)
@@ -413,12 +401,9 @@ def split_by_internal_note(df):
             if is_last_row:
                 group_df = pd.DataFrame(group_rows)
                 group_df["Trips Count"] = 1
-                group_df["Trips Count"] = group_df["Trips Count"].astype(int)
                 all_rows.extend(group_df.to_dict(orient="records"))
-
                 transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
                 total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
                 totals_row = {col: "" for col in group_df.columns}
                 totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
                 totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
@@ -429,7 +414,18 @@ def split_by_internal_note(df):
         output = BytesIO()
         final_df.to_excel(output, index=False)
         output.seek(0)
-        split_files[note] = output
+        return output
+
+    # Export known internal notes
+    for note in internal_note_values:
+        df_note = known_df[known_df['Internal Note'] == note].copy()
+        if df_note.empty:
+            continue
+        split_files[note] = group_and_export(df_note)
+
+    # Export unknown notes under "Other_report"
+    if not other_df.empty:
+        split_files["Other_report"] = group_and_export(other_df)
 
     return split_files
 
