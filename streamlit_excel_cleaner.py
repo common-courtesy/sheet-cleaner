@@ -1,5 +1,6 @@
 # streamlit_excel_cleaner.py
 import os
+import io
 import pandas as pd
 import streamlit as st
 from io import BytesIO
@@ -24,6 +25,40 @@ columns_to_hide = [
     "Local Currency Code", "Fare in USD (excl. Taxes)", "Taxes in USD", "Tip in USD", "Transaction Amount in USD (incl. Taxes)", "Estimated Service and Technology Fee (incl. Taxes, if any) in USD",
     "Health Dashboard URL", "Invoice Number", "Driver First Name", "Deductions in Local Currency", "Member ID", "Plan ID", "Network Transaction Id",
     "IsGroupOrder", "Fulfilment Type", "Country", "Cancellation type", "Membership Savings(Local Currency)", "Granular Service Purpose Type"
+]
+
+# Define expected headers for uber file
+expected_headers_uber = [
+    "Trip/Eats ID", "Transaction Timestamp (UTC)", "Request Date (UTC)", "Request Time (UTC)", "Request Date (Local)", "Request Time (Local)", 
+    "Request Type", "Pickup Date (UTC)", "Pickup Time (UTC)", "Pickup Date (Local)", "Pickup Time (Local)", 
+    "Drop-off Date (UTC)", "Drop-off Time (UTC)", "Drop-off Date (Local)", "Drop-off Time (Local)", 
+    "Request Timezone Offset from UTC", "First Name", "Last Name", "Email", "Employee ID", "Service", "City", 
+    "Distance (mi)", "Haversine Distance (mi)", "Duration (min)", "Pickup Address", "Pickup Latitude", "Pickup Longitude", 
+    "Drop-off Address", "Drop Off Latitude", "Drop Off Longitude", "Ride Status", "Expense Code", "Internal Note", 
+    "Invoices", "Program", "Group", "Payment Method", "Transaction Type", 
+    "Fare in Local Currency (excl. Taxes)", "Taxes in Local Currency", "Tip in Local Currency", 
+    "Transaction Amount in Local Currency (incl. Taxes)", "Local Currency Code", 
+    "Fare in USD (excl. Taxes)", "Taxes in USD", "Tip in USD", "Transaction Amount in USD (incl. Taxes)", 
+    "Estimated Service and Technology Fee (incl. Taxes, if any) in USD", 
+    "Health Dashboard URL", "Invoice Number", "Driver First Name", "Guest First Name", 
+    "Guest Last Name", "Passenger Number", "Deductions in Local Currency", "Member ID", "Plan ID"
+]
+
+# Define expected headers for lyft file
+expected_headers_lyft = [
+    "Ride ID", "Pickup Date (UTC)", "Pickup Time (UTC)", "Pickup Date (Local)", "Pickup Time (Local)",
+    "Pickup Timezone offset from UTC", "Drop-off Date (UTC)", "Drop-off Time (UTC)",
+    "Drop-off Date (Local)", "Drop-off Time (Local)", "First Name", "Last Name", "Email",
+    "Pickup Address", "Pickup City", "Pickup State", "Pickup Zip Code", "Drop-off Address",
+    "Drop-off City", "Drop-off State", "Drop-off Zip Code", "Request Address", "Request City",
+    "Request State", "Request Zip Code", "Destination Address", "Destination City",
+    "Destination State", "Destination Zip Code", "Distance (miles)", "Duration (minutes)",
+    "Ride Fare", "Ride Fees", "Ride Discounts", "Ride Tip", "Ride Cost", "Business Services Fee",
+    "Transaction Date (UTC)", "Transaction Time (UTC)", "Transaction Amount", "Transaction Currency",
+    "Transaction Type", "Expense Code", "Expense Note", "Ride Type", "Employee ID", "Custom Tag 1",
+    "Custom Tag 2", "Passenger Number", "Requester Name", "Requester Email", "Internal Note",
+    "Fare Type", "Scheduled Ride Id", "Flex Ride Id", "Pickup Latitude", "Pickup Longitude",
+    "Drop-off Latitude", "Drop-off Longitude"
 ]
 
 internal_note_values = ["FCC", "FCM", "FCSH", "FCSC", "DTF"]
@@ -96,9 +131,56 @@ def detect_header(uploaded_file):
         uploaded_file.seek(0)
     return None
 
+def clean_file_without_headers(df):
+    
+    # Rename columns if applicable
+    column_rename_map = {
+        "Distance (mi)": "Distance (miles)",
+        "Transaction Amount in Local Currency (incl. Taxes)": "Transaction Amount",
+        "Guest Phone Number": "Passenger Number",  
+        "Expense Memo": "Internal Note",           
+    }
+    
+    df = df.rename(columns=column_rename_map)
+
+    if 'Ride Status' in df.columns and 'Transaction Type' in df.columns:
+        df['Transaction Type'] = df['Ride Status'].combine_first(df['Transaction Type'])
+        df.drop(['Ride Status'], axis=1, inplace=True)
+    elif 'Ride Status' in df.columns:
+        df.rename(columns={"Ride Status": "Transaction Type"}, inplace=True)
+
+    if 'Email' in df.columns and 'Requester Email' in df.columns:
+        df['Email Info'] = df['Email'].combine_first(df['Requester Email'])
+        df.drop(['Email', 'Requester Email'], axis=1, inplace=True)
+    elif 'Email' in df.columns:
+        df.rename(columns={"Email": "Email Info"}, inplace=True)
+    elif 'Requester Email' in df.columns:
+        df.rename(columns={"Requester Email": "Email Info"}, inplace=True)
+
+    # Desired final columns
+    desired_columns = [
+        "Pickup Date (Local)",
+        "Pickup Time (Local)",
+        "First Name",
+        "Last Name",
+        "Email Info",
+        "Distance (miles)",
+        "Pickup Address",
+        "Drop-off Address",
+        "Transaction Type",
+        "Internal Note",
+        "Transaction Amount",
+        "Passenger Number"
+    ]
+    
+    # Keep only the desired columns that exist in the DataFrame
+    final_df = df[[col for col in desired_columns if col in df.columns]].copy()
+        
+    return final_df
+
 def clean_file(uploaded_file):
     try:
-        print("🚀 File received:", uploaded_file)
+        print("File received:", uploaded_file)
 
         is_common_courtesy = False
 
@@ -111,7 +193,7 @@ def clean_file(uploaded_file):
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, header=header_row)
                 else:
-                    print("❌ Could not detect header row — fallback to default read")
+                    print("Could not detect header row — fallback to default read")
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file)
 
@@ -127,22 +209,28 @@ def clean_file(uploaded_file):
         else:
             df = pd.read_excel(uploaded_file)
 
-        print("📋 Columns in uploaded file:", df.columns.tolist())
+        print("Columns in uploaded file:", df.columns.tolist())
 
         note_column = next((col for col in ['Internal Note', 'Expense Memo'] if col in df.columns), None)
-        print("🧩 Note column used:", note_column)
-        print("🔍 Unique note values:", df[note_column].unique())
+       
+        print("Note column used:", note_column)
+        print("Unique note values:", df[note_column].unique())
+        
         required_cols = ['First Name', 'Last Name']
         missing_cols = [col for col in required_cols if col not in df.columns]
+       
         if note_column is None:
             missing_cols.append('Internal Note or Expense Memo')
+        
         if missing_cols:
             return None
 
         df_filtered = df[df[note_column].notna() & (df[note_column].astype(str).str.strip() != "")]
         custom_columns_to_hide = columns_to_hide.copy()
+        
         if is_common_courtesy and "Email" in custom_columns_to_hide:
             custom_columns_to_hide.remove("Email")
+
         df_filtered = df_filtered.drop(columns=[col for col in custom_columns_to_hide if col in df_filtered.columns])
         if is_common_courtesy and "Transaction Type" in df_filtered.columns:
             df_filtered = df_filtered.drop(columns=["Transaction Type"])
@@ -268,22 +356,53 @@ def sort_and_merge(file1_path, file2_path):
 
     def clean_and_sort(file_obj):
         file_obj.seek(0)
+
+        df = None  # make sure df always exists
+
         if file_obj.name.endswith(".csv"):
             preview = pd.read_csv(file_obj, nrows=1, header=None)
-            file_obj.seek(0)  # 🔁 Must reset again before full read
+            file_obj.seek(0)
+
             if "Common Courtesy" in str(preview.iloc[0, 1]):
                 df = pd.read_csv(file_obj, header=4)
             else:
                 df = pd.read_csv(file_obj)
-        else:
-            df = pd.read_excel(file_obj)
 
-        # Strip whitespace from key columns
+                # Check if headers look wrong
+                if not any(col in df.columns for col in ["Last Name", "Passenger Number", "Ride ID"]):
+                    file_obj.seek(0)
+                    df = pd.read_csv(file_obj, header=None)
+
+                    # Check if first value in column 6 is a number
+                    first_value = str(df.iloc[0, 6])
+                    print('this is first value: ', first_value)
+
+                    if not any(char.isdigit() for char in first_value):
+                        print('uber sheet')
+                        sheet_type = 'uber'
+                        df.columns = expected_headers_uber
+                    else:
+                        print('lyft sheet')
+                        sheet_type = 'lyft'
+                        df.columns = expected_headers_lyft
+
+                    df = clean_file_without_headers(df)
+                else:
+                    # If headers look fine, just clean normally
+                    df = clean_file_without_headers(df)
+
+        elif file_obj.name.endswith(".xlsx"):
+            df = pd.read_excel(file_obj)
+            df = clean_file_without_headers(df)
+
+        if df is None:
+            raise ValueError("Unable to load or clean the file.")
+
+        # Clean and sort
         df['Last Name'] = df['Last Name'].astype(str).str.strip()
         df['First Name'] = df['First Name'].astype(str).str.strip()
         df['Passenger Number'] = df['Passenger Number'].astype(str).str.strip()
 
-        # ✅ Remove rows where Internal Note is empty or NaN
         if 'Internal Note' in df.columns:
             df = df[df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
 
