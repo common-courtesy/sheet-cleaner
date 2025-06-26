@@ -356,8 +356,7 @@ def sort_and_merge(file1_path, file2_path):
 
     def clean_and_sort(file_obj):
         file_obj.seek(0)
-
-        df = None  # make sure df always exists
+        df = None  # always define df
 
         if file_obj.name.endswith(".csv"):
             preview = pd.read_csv(file_obj, nrows=1, header=None)
@@ -368,32 +367,57 @@ def sort_and_merge(file1_path, file2_path):
             else:
                 df = pd.read_csv(file_obj)
 
-                # Check if headers look wrong
                 if not any(col in df.columns for col in ["Last Name", "Passenger Number", "Ride ID"]):
                     file_obj.seek(0)
                     df = pd.read_csv(file_obj, header=None)
 
-                    # Check if first value in column 6 is a number
                     first_value = str(df.iloc[0, 6])
-                    print('this is first value: ', first_value)
+                    print("this is first value:", first_value)
 
                     if not any(char.isdigit() for char in first_value):
-                        print('uber sheet')
-                        sheet_type = 'uber'
+                        print("uber sheet")
                         df.columns = expected_headers_uber
                     else:
-                        print('lyft sheet')
-                        sheet_type = 'lyft'
+                        print("lyft sheet")
                         df.columns = expected_headers_lyft
 
                     df = clean_file_without_headers(df)
                 else:
-                    # If headers look fine, just clean normally
                     df = clean_file_without_headers(df)
 
         elif file_obj.name.endswith(".xlsx"):
-            df = pd.read_excel(file_obj)
-            df = clean_file_without_headers(df)
+            from openpyxl import load_workbook
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+                tmp.write(file_obj.read())
+                tmp_path = tmp.name
+
+            preview = pd.read_excel(tmp_path, nrows=5, header=None)
+            if "Common Courtesy" in str(preview.iloc[0, 1]):
+                df = pd.read_excel(tmp_path, header=4)
+            else:
+                df = pd.read_excel(tmp_path)
+
+                if not any(col in df.columns for col in ["Last Name", "Passenger Number", "Ride ID"]):
+                    df = pd.read_excel(tmp_path, header=None)
+
+                    first_value = str(df.iloc[0, 6])
+                    print("this is first value:", first_value)
+
+                    if not any(char.isdigit() for char in first_value):
+                        print("uber sheet")
+                        df.columns = expected_headers_uber
+                    else:
+                        print("lyft sheet")
+                        df.columns = expected_headers_lyft
+
+                    df = clean_file_without_headers(df)
+                else:
+                    df = clean_file_without_headers(df)
+
+        else:
+            raise ValueError("Unsupported file format")
 
         if df is None:
             raise ValueError("Unable to load or clean the file.")
