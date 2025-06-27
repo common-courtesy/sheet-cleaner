@@ -4,6 +4,7 @@ import io
 import pandas as pd
 import streamlit as st
 from io import BytesIO
+import csv
 
 # List of columns to hide (delete)
 columns_to_hide = [
@@ -120,11 +121,12 @@ def clean_and_group(df):
 
 def detect_header(uploaded_file):
     uploaded_file.seek(0)
-    for idx in [4, 5]:
+    for idx in [0, 4, 5]:
         try:
             df = pd.read_csv(uploaded_file, header=idx, nrows=1)
             if any("trip/eats id" in col.lower() for col in df.columns):
                 uploaded_file.seek(0)
+                print( 'I found the headers on index: ', idx )
                 return idx
         except Exception:
             pass
@@ -180,10 +182,12 @@ def clean_file_without_headers(df):
 
 def clean_file(uploaded_file):
     try:
-        print("File received:", uploaded_file)
+        print("\n📥 File received:", uploaded_file.name)
+        print("📦 File type:", uploaded_file.type)
+        print("📏 File size (bytes):", uploaded_file.size)
 
         is_common_courtesy = False
-
+        
         if uploaded_file.name.endswith(".csv"):
             preview = pd.read_csv(uploaded_file, nrows=1, header=None)
             uploaded_file.seek(0)  # rewind after preview read
@@ -206,16 +210,23 @@ def clean_file(uploaded_file):
                 df.drop(columns=['Guest First Name', 'Guest Last Name'], inplace=True, errors='ignore')
             else:
                 df = pd.read_csv(uploaded_file)
+
+            # ✅ Always clean column names after any CSV read
+            df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
+
         else:
             df = pd.read_excel(uploaded_file)
+            # ✅ Also clean columns from Excel files
+            df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
 
-        print("Columns in uploaded file:", df.columns.tolist())
+
+        print("📄 Header row detected at:", header_row if 'header_row' in locals() else "default (0)")
+        print("🧠 Columns after cleanup:", df.columns.tolist())
+        print("🧠 Are columns unique?:", df.columns.is_unique)
+        print("🧪 DataFrame shape:", df.shape)
 
         note_column = next((col for col in ['Internal Note', 'Expense Memo'] if col in df.columns), None)
-       
-        print("Note column used:", note_column)
-        print("Unique note values:", df[note_column].unique())
-        
+               
         required_cols = ['First Name', 'Last Name']
         missing_cols = [col for col in required_cols if col not in df.columns]
        
@@ -244,7 +255,12 @@ def clean_file(uploaded_file):
             "Email": 'Email Info',
             "Requester Email": 'Email Info',          
         }
+
+        print("🧼 Columns before rename/drop:", df_filtered.columns.tolist())
         df_filtered.rename(columns=column_rename_map, inplace=True)
+        df_filtered = df_filtered.loc[:, ~df_filtered.columns.duplicated()]
+        print("🧼 Columns after renaming:", df_filtered.columns.tolist())
+
 
         df_filtered['First Name'] = df_filtered['First Name'].astype(str).str.strip()
         df_filtered['Last Name'] = df_filtered['Last Name'].astype(str).str.strip()
@@ -274,7 +290,8 @@ def clean_file(uploaded_file):
                 current_key = group_key
 
             if group_key != current_key:
-                group_df = pd.DataFrame(group_rows)
+                #group_df = pd.DataFrame(group_rows)
+                group_df = pd.DataFrame(group_rows).reset_index(drop=True)
                 group_df["Trips Count"] = 1
                 group_df["Trips Count"] = group_df["Trips Count"].astype(int)
                 all_rows.extend(group_df.to_dict(orient="records"))
@@ -311,6 +328,10 @@ def clean_file(uploaded_file):
         final_df = pd.DataFrame(all_rows)
 
         print("✅ Finished cleaning file, returning DataFrame")
+
+        print("✅ Final DataFrame shape:", final_df.shape)
+        print("📥 Preview of cleaned data:")
+        print(final_df.head(3).to_string(index=False))
 
         return final_df
 
