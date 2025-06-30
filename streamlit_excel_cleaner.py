@@ -5,6 +5,8 @@ import pandas as pd
 import streamlit as st
 from io import BytesIO
 import csv
+from openpyxl.styles import PatternFill, Border, Side
+from openpyxl import load_workbook
 
 # List of columns to hide (delete)
 columns_to_hide = [
@@ -63,61 +65,6 @@ expected_headers_lyft = [
 ]
 
 internal_note_values = ["FCC", "FCM", "FCSH", "FCSC", "DTF"]
-
-
-def clean_and_group(df):
-    df_sorted = df.sort_values(by=['Last Name', 'First Name', 'Passenger Number'],
-                               key=lambda col: col.str.lower() if col.dtype == 'object' else col).reset_index(drop=True)
-
-    all_rows = []
-    group_rows = []
-    current_key = None
-
-    for i in range(len(df_sorted)):
-        row = df_sorted.iloc[i]
-        group_key = (row['Passenger Number'], row['Last Name'], row['First Name'])
-
-        is_last_row = (i == len(df_sorted) - 1)
-
-        if current_key is None:
-            current_key = group_key
-
-        if group_key != current_key:
-            group_df = pd.DataFrame(group_rows)
-            group_df["Trips Count"] = 1
-            group_df["Trips Count"] = group_df["Trips Count"].astype(int)
-            all_rows.extend(group_df.to_dict(orient="records"))
-
-            transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
-            total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
-            totals_row = {col: "" for col in group_df.columns}
-            totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
-            totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
-            all_rows.append(totals_row)
-            all_rows.append({col: "" for col in group_df.columns})
-
-            group_rows = []
-
-        group_rows.append(row)
-        current_key = group_key
-
-        if is_last_row:
-            group_df = pd.DataFrame(group_rows)
-            group_df["Trips Count"] = 1
-            group_df["Trips Count"] = group_df["Trips Count"].astype(int)
-            all_rows.extend(group_df.to_dict(orient="records"))
-
-            transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
-            total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
-            totals_row = {col: "" for col in group_df.columns}
-            totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
-            totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
-            all_rows.append(totals_row)
-            all_rows.append({col: "" for col in group_df.columns})
-
-    return pd.DataFrame(all_rows)
 
 def detect_header(uploaded_file):
     uploaded_file.seek(0)
@@ -190,7 +137,7 @@ def clean_file(uploaded_file):
         
         if uploaded_file.name.endswith(".csv"):
             preview = pd.read_csv(uploaded_file, nrows=1, header=None)
-            uploaded_file.seek(0)  # rewind after preview read
+            uploaded_file.seek(0)
             if "Common Courtesy" in str(preview.iloc[0, 1]):
                 header_row = detect_header(uploaded_file)
                 if header_row is not None:
@@ -211,14 +158,10 @@ def clean_file(uploaded_file):
             else:
                 df = pd.read_csv(uploaded_file)
 
-            # ✅ Always clean column names after any CSV read
             df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
-
         else:
             df = pd.read_excel(uploaded_file)
-            # ✅ Also clean columns from Excel files
             df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
-
 
         print("📄 Header row detected at:", header_row if 'header_row' in locals() else "default (0)")
         print("🧠 Columns after cleanup:", df.columns.tolist())
@@ -226,22 +169,17 @@ def clean_file(uploaded_file):
         print("🧪 DataFrame shape:", df.shape)
 
         note_column = next((col for col in ['Internal Note', 'Expense Memo'] if col in df.columns), None)
-               
         required_cols = ['First Name', 'Last Name']
         missing_cols = [col for col in required_cols if col not in df.columns]
-       
         if note_column is None:
             missing_cols.append('Internal Note or Expense Memo')
-        
         if missing_cols:
             return None
 
         df_filtered = df[df[note_column].notna() & (df[note_column].astype(str).str.strip() != "")]
         custom_columns_to_hide = columns_to_hide.copy()
-        
         if is_common_courtesy and "Email" in custom_columns_to_hide:
             custom_columns_to_hide.remove("Email")
-
         df_filtered = df_filtered.drop(columns=[col for col in custom_columns_to_hide if col in df_filtered.columns])
         if is_common_courtesy and "Transaction Type" in df_filtered.columns:
             df_filtered = df_filtered.drop(columns=["Transaction Type"])
@@ -250,17 +188,16 @@ def clean_file(uploaded_file):
             "Distance (mi)": "Distance (miles)",
             "Transaction Amount in Local Currency (incl. Taxes)": "Transaction Amount",
             "Ride Status": "Transaction Type",
-            "Guest Phone Number": "Passenger Number",  
-            "Expense Memo": "Internal Note",  
+            "Guest Phone Number": "Passenger Number",
+            "Expense Memo": "Internal Note",
             "Email": 'Email Info',
-            "Requester Email": 'Email Info',          
+            "Requester Email": 'Email Info',
         }
 
         print("🧼 Columns before rename/drop:", df_filtered.columns.tolist())
         df_filtered.rename(columns=column_rename_map, inplace=True)
         df_filtered = df_filtered.loc[:, ~df_filtered.columns.duplicated()]
         print("🧼 Columns after renaming:", df_filtered.columns.tolist())
-
 
         df_filtered['First Name'] = df_filtered['First Name'].astype(str).str.strip()
         df_filtered['Last Name'] = df_filtered['Last Name'].astype(str).str.strip()
@@ -279,26 +216,22 @@ def clean_file(uploaded_file):
         for i in range(len(df_values)):
             row = df_values.iloc[i]
             group_key = (row['Passenger Number'], row['Last Name'], row['First Name'])
-
             is_last_row = (i == len(df_values) - 1)
-            next_key = (
-                (df_values.iloc[i + 1]['Passenger Number'], df_values.iloc[i + 1]['Last Name'], df_values.iloc[i + 1]['First Name'])
-                if not is_last_row else None
-            )
+
+            transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in df_values.columns), None)
+            row = row.copy()
+            row["Fares Only"] = row.get(transaction_col or "Transaction Amount", "")
 
             if current_key is None:
                 current_key = group_key
 
             if group_key != current_key:
-                #group_df = pd.DataFrame(group_rows)
                 group_df = pd.DataFrame(group_rows).reset_index(drop=True)
                 group_df["Trips Count"] = 1
                 group_df["Trips Count"] = group_df["Trips Count"].astype(int)
                 all_rows.extend(group_df.to_dict(orient="records"))
 
-                transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
                 total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
                 totals_row = {col: "" for col in group_df.columns}
                 totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
                 totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
@@ -316,9 +249,7 @@ def clean_file(uploaded_file):
                 group_df["Trips Count"] = group_df["Trips Count"].astype(int)
                 all_rows.extend(group_df.to_dict(orient="records"))
 
-                transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in group_df.columns), None)
                 total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-
                 totals_row = {col: "" for col in group_df.columns}
                 totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
                 totals_row["Trips Count"] = int(group_df["Trips Count"].sum())
@@ -327,13 +258,65 @@ def clean_file(uploaded_file):
 
         final_df = pd.DataFrame(all_rows)
 
-        print("✅ Finished cleaning file, returning DataFrame")
+        # ✅ Add final grand total row for Fares Only
+        fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+        grand_total_row = {col: "" for col in final_df.columns}
+        grand_total_row["Fares Only"] = round(fares_total, 2)
+        final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
 
-        print("✅ Final DataFrame shape:", final_df.shape)
-        print("📥 Preview of cleaned data:")
-        print(final_df.head(3).to_string(index=False))
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            # Move 'Fares Only' to the last column
+            if "Fares Only" in final_df.columns:
+                final_df = final_df[[col for col in final_df.columns if col != "Fares Only"] + ["Fares Only"]]
 
-        return final_df
+            final_df.to_excel(writer, index=False, sheet_name="CleanedData")
+
+            workbook = writer.book
+            worksheet = writer.sheets["CleanedData"]
+
+            # Define fills for each internal note type
+            fills = {
+                "FCC": PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"),   # Light Blue
+                "FCM": PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid"),   # Light Green
+                "FCSH": PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),  # Light Yellow
+                "FCSC": PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),  # Light Orange
+                "DTF": PatternFill(start_color="E4DFEC", end_color="E4DFEC", fill_type="solid"),   # Light Purple
+                "Other": PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid"), # Light Gray
+            }
+
+            thin_border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+
+            # Get the index of Internal Note column
+            headers = [cell.value for cell in worksheet[1]]
+            note_col_idx = headers.index("Internal Note") + 1  # openpyxl is 1-based
+
+            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                note_cell = row[note_col_idx - 1]
+                # Check if it's a summary row (Trips Count is empty)
+                trips_count_cell = row[headers.index("Trips Count")]
+                is_summary_row = not trips_count_cell.value or str(trips_count_cell.value).strip() == ""
+
+                note_value = str(note_cell.value).strip() if note_cell.value else ""
+
+                if note_value and not is_summary_row:
+                    fill = fills.get(note_value, fills["Other"])
+                    for cell in row:
+                        cell.fill = fill
+                        cell.border = thin_border
+                else:
+                    for cell in row:
+                        cell.border = thin_border  # Just apply borders, no fill
+
+
+        output.seek(0)
+
+        return final_df, output
 
     except Exception as e:
         print("Error:", e)
@@ -347,17 +330,19 @@ st.markdown("Upload your Excel or CSV file to clean and summarize your data.")
 uploaded_file = st.file_uploader("Upload .xlsx or .csv file", type=["xlsx", "csv"])
 
 if uploaded_file:
-    cleaned_df = clean_file(uploaded_file)
+    cleaned_df, output = clean_file(uploaded_file)
     print("🧪 Shape after filtering:", cleaned_df)
 
     if cleaned_df is not None:
         st.success("✅ File cleaned successfully!")
         st.dataframe(cleaned_df.head(50))
 
-        output = BytesIO()
-        cleaned_df.to_excel(output, index=False)
-        output.seek(0)
-        st.download_button("📥 Download Cleaned File", output, file_name="cleaned_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            "📥 Download Cleaned File",
+            output,
+            file_name="cleaned_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # --- Visual Divider ---
 st.markdown("""
@@ -466,18 +451,18 @@ def sort_and_merge(file1_path, file2_path):
     ).reset_index(drop=True)
 
     all_rows = []
+    df_values = df_sorted.reset_index(drop=True)
     group_rows = []
     current_key = None
 
     for i in range(len(df_sorted)):
         row = df_sorted.iloc[i]
         group_key = (row['Passenger Number'], row['Last Name'], row['First Name'])
-
         is_last_row = (i == len(df_sorted) - 1)
-        next_key = (
-            (df_sorted.iloc[i + 1]['Passenger Number'], df_sorted.iloc[i + 1]['Last Name'], df_sorted.iloc[i + 1]['First Name'])
-            if not is_last_row else None
-        )
+
+        transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in df_values.columns), None)
+        row = row.copy()
+        row["Fares Only"] = row.get(transaction_col or "Transaction Amount", "")
 
         if current_key is None:
             current_key = group_key
@@ -518,7 +503,66 @@ def sort_and_merge(file1_path, file2_path):
             all_rows.append({col: "" for col in group_df.columns})
 
     final_df = pd.DataFrame(all_rows)
-    return final_df
+
+    # ✅ Add final grand total row for Fares Only
+    fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+    grand_total_row = {col: "" for col in final_df.columns}
+    grand_total_row["Fares Only"] = round(fares_total, 2)
+    final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        # Move 'Fares Only' to the last column
+        if "Fares Only" in final_df.columns:
+            final_df = final_df[[col for col in final_df.columns if col != "Fares Only"] + ["Fares Only"]]
+
+        final_df.to_excel(writer, index=False, sheet_name="CleanedData")
+        workbook = writer.book
+        worksheet = writer.sheets["CleanedData"]
+
+        # Color fills by internal note
+        fills = {
+            "FCC": PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"),
+            "FCM": PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid"),
+            "FCSH": PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
+            "FCSC": PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
+            "DTF": PatternFill(start_color="E4DFEC", end_color="E4DFEC", fill_type="solid"),
+            "Other": PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid"),
+        }
+
+        # Define a thin border for all cells
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+
+        # Get column indices
+        headers = [cell.value for cell in worksheet[1]]
+        note_col_idx = headers.index("Internal Note") + 1 if "Internal Note" in headers else None
+        trips_col_idx = headers.index("Trips Count") + 1 if "Trips Count" in headers else None
+
+        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+            # Detect if row is a summary row
+            is_summary_row = trips_col_idx and (not row[trips_col_idx - 1].value)
+
+            # Highlight based on Internal Note only if not a summary row
+            if note_col_idx and not is_summary_row:
+                note_value = str(row[note_col_idx - 1].value).strip() if row[note_col_idx - 1].value else ""
+                if note_value:
+                    fill = fills.get(note_value, fills["Other"])
+                    for cell in row:
+                        cell.fill = fill
+                        cell.border = thin_border
+                    continue
+
+            # Otherwise, apply only borders (no fill)
+            for cell in row:
+                cell.border = thin_border
+
+    output.seek(0)
+    return final_df, output
 
 def split_by_internal_note(df):
     split_files = {}
@@ -575,6 +619,13 @@ def split_by_internal_note(df):
                 all_rows.append({col: "" for col in group_df.columns})
 
         final_df = pd.DataFrame(all_rows)
+
+        # ✅ Add grand total at the bottom
+        fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+        grand_total_row = {col: "" for col in final_df.columns}
+        grand_total_row["Fares Only"] = round(fares_total, 2)
+        final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+
         output = BytesIO()
         final_df.to_excel(output, index=False)
         output.seek(0)
@@ -596,13 +647,9 @@ def split_by_internal_note(df):
 if uploaded_file1 and uploaded_file2:
     try:
         st.info("🟡 Merging files...")
-        df = sort_and_merge(uploaded_file1, uploaded_file2)
+        df, output = sort_and_merge(uploaded_file1, uploaded_file2)
         st.success("✅ Files merged successfully!")
         st.dataframe(df.head(50))  # Show preview
-
-        output = BytesIO()
-        df.to_excel(output, index=False)
-        output.seek(0)
 
         st.download_button(
             "📥 Download Merged File",
