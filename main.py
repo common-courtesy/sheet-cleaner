@@ -12,7 +12,11 @@ app = FastAPI()
 async def clean_uploaded_file(file: UploadFile = File(...)):
     contents = await file.read()
     uploaded_file = BytesIO(contents)
+    
+    # ✅ Add the expected attributes
     uploaded_file.name = file.filename
+    uploaded_file.type = file.content_type
+    uploaded_file.size = len(contents)
 
     result = clean_file(uploaded_file)
     if result is None:
