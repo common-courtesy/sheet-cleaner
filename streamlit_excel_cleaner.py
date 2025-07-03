@@ -82,6 +82,17 @@ def detect_header(uploaded_file):
 
 def clean_file_without_headers(df):
     
+    # Eliminate unwanted name columns
+    name_headers = ["First Name", "Last Name", "Guest First Name", "Guest Last Name"]
+
+    if all(header in df.columns for header in name_headers):
+        print( 'we have detected that there are name columns that need to be deleted' )
+        df = df.drop(columns=["First Name", "Last Name"])
+        df = df.rename(columns={
+            "Guest First Name": "First Name",
+            "Guest Last Name": "Last Name"
+        })
+
     # Rename columns if applicable
     column_rename_map = {
         "Distance (mi)": "Distance (miles)",
@@ -167,6 +178,17 @@ def clean_file(uploaded_file):
         print("🧠 Columns after cleanup:", df.columns.tolist())
         print("🧠 Are columns unique?:", df.columns.is_unique)
         print("🧪 DataFrame shape:", df.shape)
+
+        # Eliminate unwanted name columns
+        name_headers = ["First Name", "Last Name", "Guest First Name", "Guest Last Name"]
+
+        if all(header in df.columns for header in name_headers):
+            print( 'we have detected that there are name columns that need to be deleted' )
+            df = df.drop(columns=["First Name", "Last Name"])
+            df = df.rename(columns={
+                "Guest First Name": "First Name",
+                "Guest Last Name": "Last Name"
+            })
 
         note_column = next((col for col in ['Internal Note', 'Expense Memo'] if col in df.columns), None)
         required_cols = ['First Name', 'Last Name']
