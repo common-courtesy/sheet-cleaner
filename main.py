@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from io import BytesIO
 from streamlit_excel_cleaner import clean_file
@@ -7,6 +8,14 @@ import zipfile
 import tempfile
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # or ["*"] for all origins during testing
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.post("/clean")
 async def clean_uploaded_file(file: UploadFile = File(...)):
