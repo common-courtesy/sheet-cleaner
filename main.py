@@ -2,6 +2,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 
 from typing import List
 from io import BytesIO
@@ -12,6 +13,7 @@ from streamlit_excel_cleaner import split_by_internal_note
 
 import zipfile
 import tempfile
+import base64
 
 app = FastAPI()
 
@@ -75,24 +77,11 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     cleaned_df, _ = result
     split_files = split_by_internal_note(cleaned_df)
 
-    # Build multipart/mixed response manually
-    boundary = "split-boundary"
-    body = b""
+    response_data = {}
 
     for note, file_io in split_files.items():
         file_io.seek(0)
-        file_content = file_io.read()
-        part = (
-            f"--{boundary}\r\n"
-            f"Content-Disposition: attachment; filename=\"{note}.xlsx\"\r\n"
-            f"Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n"
-            f"\r\n"
-        ).encode("utf-8") + file_content + b"\r\n"
-        body += part
+        b64_file = base64.b64encode(file_io.read()).decode('utf-8')
+        response_data[note] = b64_file  # filename: base64
 
-    body += f"--{boundary}--\r\n".encode("utf-8")
-
-    return Response(
-        content=body,
-        media_type=f"multipart/mixed; boundary={boundary}"
-    )
+    return JSONResponse(content=response_data)
