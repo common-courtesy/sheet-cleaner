@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from io import BytesIO
 from streamlit_excel_cleaner import clean_file
+from streamlit_excel_cleaner import sort_and_merge
+from streamlit_excel_cleaner import split_by_internal_note
 import zipfile
 import tempfile
 
