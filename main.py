@@ -15,6 +15,8 @@ import zipfile
 import tempfile
 import base64
 
+from pandas import read_excel
+
 app = FastAPI()
 
 app.add_middleware(
@@ -70,18 +72,19 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     uploaded_file = BytesIO(contents)
     uploaded_file.name = file.filename
 
-    result = clean_file(uploaded_file)
-    if result is None:
-        return {"error": "Cleaning failed."}
+    try:
+        df = read_excel(uploaded_file)
+    except Exception as e:
+        return {"error": f"Failed to read Excel file: {str(e)}"}
 
-    cleaned_df, _ = result
-    split_files = split_by_internal_note(cleaned_df)
+    split_files = split_by_internal_note(df)
+    if not split_files:
+        return {"error": "Could not split. 'Internal Note' missing or empty."}
 
     response_data = {}
-
     for note, file_io in split_files.items():
         file_io.seek(0)
         b64_file = base64.b64encode(file_io.read()).decode('utf-8')
-        response_data[note] = b64_file  # filename: base64
+        response_data[note] = b64_file
 
     return JSONResponse(content=response_data)
