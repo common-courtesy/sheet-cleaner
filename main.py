@@ -1,11 +1,15 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+
 from typing import List
 from io import BytesIO
+
 from streamlit_excel_cleaner import clean_file
 from streamlit_excel_cleaner import sort_and_merge
 from streamlit_excel_cleaner import split_by_internal_note
+
 import zipfile
 import tempfile
 
@@ -13,7 +17,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or ["*"] for all origins during testing
+    allow_origins=["http://localhost:3000"],  # or ["*"] for all origins during testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,13 +75,24 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     cleaned_df, _ = result
     split_files = split_by_internal_note(cleaned_df)
 
-    # Create ZIP in memory
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zipf:
-        for note, file_io in split_files.items():
-            zipf.writestr(f"{note}.xlsx", file_io.read())
-    zip_buffer.seek(0)
+    # Build multipart/mixed response manually
+    boundary = "split-boundary"
+    body = b""
 
-    return StreamingResponse(zip_buffer, media_type="application/zip", headers={
-        "Content-Disposition": "attachment; filename=split_reports.zip"
-    })
+    for note, file_io in split_files.items():
+        file_io.seek(0)
+        file_content = file_io.read()
+        part = (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: attachment; filename=\"{note}.xlsx\"\r\n"
+            f"Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n"
+            f"\r\n"
+        ).encode("utf-8") + file_content + b"\r\n"
+        body += part
+
+    body += f"--{boundary}--\r\n".encode("utf-8")
+
+    return Response(
+        content=body,
+        media_type=f"multipart/mixed; boundary={boundary}"
+    )
