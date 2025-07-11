@@ -111,8 +111,15 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     zip_buffer.seek(0)
 
+    zip_data = zip_buffer.read()
+
     # Store zip in memory temporarily
     zip_b64 = base64.b64encode(zip_buffer.read()).decode("utf-8")
+
+    # Save ZIP to disk for debugging
+    with open("debug_split.zip", "wb") as f:
+        f.write(zip_data)
+    print("✅ Wrote debug_split.zip with size:", os.path.getsize("debug_split.zip"))
 
     print(f"Split file keys: {list(split_files.keys())}")
 
