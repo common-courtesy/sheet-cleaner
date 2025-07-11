@@ -103,7 +103,7 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
         for note, file_io in split_files.items():
             file_io.seek(0)
             temp_df = pd.read_excel(file_io)
-            preview_data[note] = temp_df.head(10).to_dict(orient="records")
+            preview_data[note] = temp_df.head(10).fillna("").to_dict(orient="records")
 
             # Rewind again before writing to zip
             file_io.seek(0)
