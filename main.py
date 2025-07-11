@@ -57,9 +57,13 @@ async def merge_two_files(file1: UploadFile = File(...), file2: UploadFile = Fil
 
     file1_obj = BytesIO(contents1)
     file1_obj.name = file1.filename
+    file1_obj.type = file1.content_type
+    file1_obj.size = len(contents1)
 
     file2_obj = BytesIO(contents2)
     file2_obj.name = file2.filename
+    file2_obj.type = file2.content_type
+    file2_obj.size = len(contents2)
 
     try:
         df, output = sort_and_merge(file1_obj, file2_obj)
