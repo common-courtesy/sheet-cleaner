@@ -99,7 +99,7 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     preview_data = {}
     zip_buffer = BytesIO()
 
-    with zipfile.ZipFile(zip_buffer, "w") as zf:
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for note, file_io in split_files.items():
             file_io.seek(0)
             temp_df = pd.read_excel(file_io)
