@@ -118,11 +118,14 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     # Save ZIP to disk for debugging
     debug_zip_path = os.path.join(DOWNLOAD_DIR, "debug_split.zip")
-    with open(debug_zip_path, "wb") as f:
-        f.write(base64.b64decode(zip_b64))
-    print("✅ Wrote debug_split.zip with size:", os.path.getsize(debug_zip_path))
+    try:
+        with open(debug_zip_path, "wb") as f:
+            f.write(base64.b64decode(zip_b64))
+        print("✅ Wrote debug_split.zip to:", debug_zip_path)
+        print("📏 Zip size (bytes):", os.path.getsize(debug_zip_path))
+    except Exception as e:
+        print("❌ Failed to write debug zip:", str(e))
 
-    print(f"Split file keys: {list(split_files.keys())}")
 
     # Clean NaN values from preview
     for key in preview_data:
