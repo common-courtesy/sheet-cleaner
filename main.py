@@ -76,7 +76,10 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     uploaded_file = BytesIO(contents)
     uploaded_file.name = file.filename
 
+    print(f"Received file: {file.filename}, size: {len(contents)} bytes")
+
     try:
+        print("Trying to read file with openpyxl...")
         df = read_excel(uploaded_file, engine='openpyxl')
     except Exception as e1:
         try:
@@ -85,6 +88,10 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
         except Exception as e2:
             return {"error": f"Failed to read Excel file. openpyxl: {e1}, xlrd: {e2}"}
 
+    print(f"DataFrame shape: {df.shape}")
+    print(f"Columns: {df.columns.tolist()}")
+
+    print("Splitting DataFrame by internal notes...")
     split_files = split_by_internal_note(df)
     if not split_files:
         return {"error": "Could not split. 'Internal Note' missing or empty."}
@@ -106,6 +113,8 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     # Store zip in memory temporarily
     zip_b64 = base64.b64encode(zip_buffer.read()).decode("utf-8")
+
+    print(f"Split file keys: {list(split_files.keys())}")
 
     return JSONResponse(content={
         "preview": preview_data,
