@@ -76,6 +76,9 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     uploaded_file = BytesIO(contents)
     uploaded_file.name = file.filename
 
+    print("✅ Merge result shape:", df.shape)
+    print(df.head())
+
     print(f"Received file: {file.filename}, size: {len(contents)} bytes")
 
     try:
@@ -125,7 +128,6 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
         print("📏 Zip size (bytes):", os.path.getsize(debug_zip_path))
     except Exception as e:
         print("❌ Failed to write debug zip:", str(e))
-
 
     # Clean NaN values from preview
     for key in preview_data:
