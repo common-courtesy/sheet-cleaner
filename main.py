@@ -89,12 +89,14 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     response_data = {}
     for note, file_io in split_files.items():
+        file_io.seek(0)  # 🛠️ Add this line
         unique_id = str(uuid.uuid4())
         filename = f"{note}_{unique_id}.xlsx"
         file_path = os.path.join(DOWNLOAD_DIR, filename)
 
         with open(file_path, "wb") as f:
             f.write(file_io.read())
+
 
         response_data[note] = f"https://sheet-cleaner.onrender.com/download/{filename}"
 
