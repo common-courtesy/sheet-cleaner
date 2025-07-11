@@ -10,11 +10,13 @@ from streamlit_excel_cleaner import sort_and_merge
 from streamlit_excel_cleaner import split_by_internal_note
 
 import zipfile
-import tempfile
+import uuid
+import zipfile
 import base64
 import os
 
 from pandas import read_excel
+import pandas as pd
 
 app = FastAPI()
 
@@ -87,20 +89,28 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     if not split_files:
         return {"error": "Could not split. 'Internal Note' missing or empty."}
 
-    response_data = {}
-    for note, file_io in split_files.items():
-        file_io.seek(0)  # 🛠️ Add this line
-        unique_id = str(uuid.uuid4())
-        filename = f"{note}_{unique_id}.xlsx"
-        file_path = os.path.join(DOWNLOAD_DIR, filename)
+    preview_data = {}
+    zip_buffer = BytesIO()
 
-        with open(file_path, "wb") as f:
-            f.write(file_io.read())
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for note, file_io in split_files.items():
+            file_io.seek(0)
+            temp_df = pd.read_excel(file_io)
+            preview_data[note] = temp_df.head(10).to_dict(orient="records")
 
+            # Rewind again before writing to zip
+            file_io.seek(0)
+            zf.writestr(f"{note}.xlsx", file_io.read())
 
-        response_data[note] = f"https://sheet-cleaner.onrender.com/download/{filename}"
+    zip_buffer.seek(0)
 
-    return JSONResponse(content=response_data)
+    # Store zip in memory temporarily
+    zip_b64 = base64.b64encode(zip_buffer.read()).decode("utf-8")
+
+    return JSONResponse(content={
+        "preview": preview_data,
+        "zip_base64": zip_b64  # Let frontend decode and download if needed
+    })
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
