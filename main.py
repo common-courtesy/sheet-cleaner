@@ -1,6 +1,7 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse, FileResponse, StreamingResponse
+from fastapi.requests import Request
 
 from typing import List
 from io import BytesIO
@@ -134,3 +135,8 @@ async def download_file(filename: str):
     if os.path.exists(file_path):
         return FileResponse(path=file_path, filename=filename, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     return {"error": "File not found"}
+
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(request: Request, rest_of_path: str):
+    return Response(status_code=204)
