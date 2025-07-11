@@ -80,25 +80,18 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     uploaded_file = BytesIO(contents)
     uploaded_file.name = file.filename
 
-    print("✅ Merge result shape:", df.shape)
-    print(df.head())
-
-    print(f"Received file: {file.filename}, size: {len(contents)} bytes")
+    print(f"📥 Received file: {file.filename}, size: {len(contents)} bytes")
 
     try:
-        print("Trying to read file with openpyxl...")
-        df = read_excel(uploaded_file, engine='openpyxl')
-    except Exception as e1:
-        try:
-            uploaded_file.seek(0)
-            df = read_excel(uploaded_file, engine='xlrd')
-        except Exception as e2:
-            return {"error": f"Failed to read Excel file. openpyxl: {e1}, xlrd: {e2}"}
+        print("📖 Reading Excel file with openpyxl...")
+        df = pd.read_excel(uploaded_file, engine='openpyxl')
+    except Exception as e:
+        return {"error": f"❌ Failed to read Excel file. Reason: {str(e)}"}
 
-    print(f"DataFrame shape: {df.shape}")
-    print(f"Columns: {df.columns.tolist()}")
+    print(f"✅ DataFrame loaded. Shape: {df.shape}")
+    print(f"📑 Columns: {df.columns.tolist()}")
+    print("🔀 Splitting DataFrame by Internal Note...")
 
-    print("Splitting DataFrame by internal notes...")
     split_files = split_by_internal_note(df)
     if not split_files:
         return {"error": "Could not split. 'Internal Note' missing or empty."}
@@ -109,40 +102,30 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for note, file_io in split_files.items():
             file_io.seek(0)
-            temp_df = pd.read_excel(file_io)
-            preview_data[note] = temp_df.head(10).fillna("").to_dict(orient="records")
+            df_note = pd.read_excel(file_io)
+            preview_data[note] = df_note.head(10).fillna("").replace({pd.NA: None}).to_dict(orient="records")
 
-            # Rewind again before writing to zip
             file_io.seek(0)
             zf.writestr(f"{note}.xlsx", file_io.read())
 
     zip_buffer.seek(0)
-
     zip_data = zip_buffer.read()
+    zip_b64 = base64.b64encode(zip_data).decode("utf-8")
 
-    # Store zip in memory temporarily
-    zip_b64 = base64.b64encode(zip_buffer.read()).decode("utf-8")
-
-    # Save ZIP to disk for debugging
-    debug_zip_path = os.path.join(DOWNLOAD_DIR, "debug_split.zip")
+    # Optional: Save debug ZIP
+    debug_zip_path = os.path.join("downloads", "debug_split.zip")
     try:
+        os.makedirs("downloads", exist_ok=True)
         with open(debug_zip_path, "wb") as f:
-            f.write(base64.b64decode(zip_b64))
+            f.write(zip_data)
         print("✅ Wrote debug_split.zip to:", debug_zip_path)
         print("📏 Zip size (bytes):", os.path.getsize(debug_zip_path))
     except Exception as e:
         print("❌ Failed to write debug zip:", str(e))
 
-    # Clean NaN values from preview
-    for key in preview_data:
-        for row in preview_data[key]:
-            for k, v in row.items():
-                if pd.isna(v):
-                    row[k] = None
-
     return JSONResponse(content={
         "preview": preview_data,
-        "zip_base64": zip_b64  # Let frontend decode and download if needed
+        "zip_base64": zip_b64
     })
 
 @app.get("/download/{filename}")
