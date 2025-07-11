@@ -116,6 +116,13 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     print(f"Split file keys: {list(split_files.keys())}")
 
+    # Clean NaN values from preview
+    for key in preview_data:
+        for row in preview_data[key]:
+            for k, v in row.items():
+                if pd.isna(v):
+                    row[k] = None
+
     return JSONResponse(content={
         "preview": preview_data,
         "zip_base64": zip_b64  # Let frontend decode and download if needed
