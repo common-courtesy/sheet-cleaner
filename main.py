@@ -122,7 +122,7 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for note, (df_note, file_io) in split_files.items():
-            preview_data[note] = df_note.head(10).fillna("").replace({pd.NA: None}).to_dict(orient="records")
+            preview_data[note] = df_note.fillna("").replace({pd.NA: None}).to_dict(orient="records")
 
             file_io.seek(0)
             b64_excel = base64.b64encode(file_io.read()).decode("utf-8")
@@ -151,7 +151,7 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
         "download_links": download_links,
         "zip_base64": zip_b64  # Optional
     })
-
+    
 @app.get("/download/{filename}")
 async def download_file(filename: str):
     file_path = os.path.join(DOWNLOAD_DIR, filename)
