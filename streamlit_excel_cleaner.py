@@ -643,15 +643,16 @@ def split_by_internal_note(df):
         final_df = pd.DataFrame(all_rows)
 
         # ✅ Add grand total at the bottom
-        fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
-        grand_total_row = {col: "" for col in final_df.columns}
-        grand_total_row["Fares Only"] = round(fares_total, 2)
-        final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+        if "Fares Only" in final_df.columns:
+            fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+            grand_total_row = {col: "" for col in final_df.columns}
+            grand_total_row["Fares Only"] = round(fares_total, 2)
+            final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
 
         output = BytesIO()
         final_df.to_excel(output, index=False)
         output.seek(0)
-        return output
+        return final_df, output  # ✅ Return both
 
     # Export known internal notes
     for note in internal_note_values:
