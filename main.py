@@ -98,14 +98,21 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
         return {"error": "Could not split. 'Internal Note' missing or empty."}
 
     preview_data = {}
-    zip_buffer = BytesIO()
+    download_links = {}  # <-- New
 
+    zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for note, file_io in split_files.items():
             file_io.seek(0)
             df_note = pd.read_excel(file_io)
             preview_data[note] = df_note.head(10).fillna("").replace({pd.NA: None}).to_dict(orient="records")
 
+            # Encode individual Excel file to base64 for direct download
+            file_io.seek(0)
+            b64_excel = base64.b64encode(file_io.read()).decode("utf-8")
+            download_links[note] = f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}"
+
+            # Also write to zip for optional debugging
             file_io.seek(0)
             zf.writestr(f"{note}.xlsx", file_io.read())
 
@@ -113,7 +120,7 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     zip_data = zip_buffer.read()
     zip_b64 = base64.b64encode(zip_data).decode("utf-8")
 
-    # Optional: Save debug ZIP
+    # Optional: Save debug zip
     debug_zip_path = os.path.join("downloads", "debug_split.zip")
     try:
         os.makedirs("downloads", exist_ok=True)
@@ -126,7 +133,8 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     return JSONResponse(content={
         "preview": preview_data,
-        "zip_base64": zip_b64
+        "download_links": download_links,
+        "zip_base64": zip_b64  # Optional
     })
 
 @app.get("/download/{filename}")
