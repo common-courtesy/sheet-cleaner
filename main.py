@@ -89,11 +89,30 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
     except Exception as e:
         return {"error": f"❌ Failed to read Excel file. Reason: {str(e)}"}
 
-    print(f"✅ DataFrame loaded. Shape: {df.shape}")
-    print(f"📑 Columns: {df.columns.tolist()}")
-    print("🔀 Splitting DataFrame by Internal Note...")
-
     split_files = split_by_internal_note(df)
+
+    print("🔍 Verifying structure of split_files...")
+    if not isinstance(split_files, dict):
+        print("❌ split_by_internal_note did not return a dictionary.")
+        return {"error": "split_by_internal_note did not return a dictionary."}
+
+    for note, value in split_files.items():
+        if not isinstance(value, tuple) or len(value) != 2:
+            print(f"❌ Value for '{note}' is not a tuple of length 2: {value}")
+            return {"error": f"Value for '{note}' is not a (df, file_io) tuple."}
+        
+        df_note, file_io = value
+        
+        if not isinstance(df_note, pd.DataFrame):
+            print(f"❌ First item in tuple for '{note}' is not a DataFrame.")
+            return {"error": f"First item in tuple for '{note}' is not a DataFrame."}
+        
+        if not isinstance(file_io, BytesIO):
+            print(f"❌ Second item in tuple for '{note}' is not a BytesIO.")
+            return {"error": f"Second item in tuple for '{note}' is not a BytesIO."}
+
+    print("✅ split_by_internal_note returned valid (DataFrame, BytesIO) tuples.")
+
     if not split_files:
         return {"error": "Could not split. 'Internal Note' missing or empty."}
 
@@ -102,17 +121,13 @@ async def split_file_by_internal_note(file: UploadFile = File(...)):
 
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for note, file_io in split_files.items():
-            file_io.seek(0)
-            df_note = pd.read_excel(file_io)
+        for note, (df_note, file_io) in split_files.items():
             preview_data[note] = df_note.head(10).fillna("").replace({pd.NA: None}).to_dict(orient="records")
 
-            # Encode individual Excel file to base64 for direct download
             file_io.seek(0)
             b64_excel = base64.b64encode(file_io.read()).decode("utf-8")
             download_links[note] = f"data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}"
 
-            # Also write to zip for optional debugging
             file_io.seek(0)
             zf.writestr(f"{note}.xlsx", file_io.read())
 
