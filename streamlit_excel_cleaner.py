@@ -596,8 +596,9 @@ def split_by_internal_note(df):
     df['First Name'] = df['First Name'].astype(str).str.strip()
     df['Passenger Number'] = df['Passenger Number'].astype(str).str.strip()
 
-    known_df = df[df['Internal Note'].isin(internal_note_values)]
-    other_df = df[~df['Internal Note'].isin(internal_note_values) & df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
+    norm_notes = df['Internal Note'].astype(str).str.strip().str.upper()
+    known_df = df[norm_notes.isin([v.upper() for v in internal_note_values])]
+    other_df = df[~norm_notes.isin([v.upper() for v in internal_note_values]) & df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
 
 def split_by_internal_note(df):
     split_files = {}
