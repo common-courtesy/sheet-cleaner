@@ -764,7 +764,29 @@ def split_by_internal_note(df):
             final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
 
         output = BytesIO()
-        final_df.to_excel(output, index=False)
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            sheet_name = "Sheet1"
+            final_df.to_excel(writer, index=False, sheet_name=sheet_name)
+            ws = writer.sheets[sheet_name]
+
+            from openpyxl.utils import get_column_letter
+
+            currency_cols = [
+                "Fares Only",
+                "Rider Co-Pay",
+                "Net Forsyth Cost",
+                "Rider Share over $13",
+                "Rider Bill",
+                "Total Rider Cost Bill",
+            ]
+
+            # Apply Excel currency format to all data rows (skip header)
+            for col_name in currency_cols:
+                if col_name in final_df.columns:
+                    col_idx = final_df.columns.get_loc(col_name) + 1  # 1-based
+                    for r in range(2, len(final_df) + 2):  # rows 2..N+1
+                        ws.cell(row=r, column=col_idx).number_format = '"$"#,##0.00'
+
         output.seek(0)
         return final_df, output
 
