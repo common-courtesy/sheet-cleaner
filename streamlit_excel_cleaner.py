@@ -592,166 +592,198 @@ def split_by_internal_note(df):
     if 'Internal Note' not in df.columns:
         return {}
 
+    # Normalize key fields
     df['Last Name'] = df['Last Name'].astype(str).str.strip()
     df['First Name'] = df['First Name'].astype(str).str.strip()
     df['Passenger Number'] = df['Passenger Number'].astype(str).str.strip()
 
+    # Case-insensitive notes
     norm_notes = df['Internal Note'].astype(str).str.strip().str.upper()
-    known_df = df[norm_notes.isin([v.upper() for v in internal_note_values])]
-    other_df = df[~norm_notes.isin([v.upper() for v in internal_note_values]) & df['Internal Note'].notna() & (df['Internal Note'].astype(str).str.strip() != "")]
+
+    # 1) Build the combined DTF dataset (DTF + DTFCE)
+    dtf_notes = {"DTF", "DTFCE"}
+    dtf_mask = norm_notes.isin(dtf_notes)
+    df_dtf = df[dtf_mask].copy()
+
+    # 2) Work on the remaining rows for normal per-note exports
+    remaining = df[~dtf_mask].copy()
+    remaining_norm = remaining['Internal Note'].astype(str).str.strip().str.upper()
+
+    known_df = remaining[remaining_norm.isin([v.upper() for v in internal_note_values])]
+    other_df = remaining[
+        ~remaining_norm.isin([v.upper() for v in internal_note_values])
+        & remaining['Internal Note'].notna()
+        & (remaining['Internal Note'].astype(str).str.strip() != "")
+    ]
 
     def group_and_export(df_note, is_dtf=False):
-            all_rows = []
-            group_rows = []
-            current_key = None
-    
-            for i in range(len(df_note)):
-                base_row = df_note.iloc[i]
-                group_key = (base_row['Passenger Number'], base_row['Last Name'], base_row['First Name'])
-                is_last_row = (i == len(df_note) - 1)
-    
-                if current_key is None:
-                    current_key = group_key
-    
-                if group_key != current_key:
-                    group_df = pd.DataFrame(group_rows)
-                    group_df["Trips Count"] = 1
-                    all_rows.extend(group_df.to_dict(orient="records"))
-    
-                    transaction_col = next((col for col in ["Transaction Amount",
-                                                            "Transaction Amount in Local Currency (incl. Taxes)"]
-                                            if col in group_df.columns), None)
-                    total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-    
-                    totals_row = {col: None for col in group_df.columns}
-                    totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
-                    totals_row["Trips Count"] = int(pd.to_numeric(group_df["Trips Count"], errors="coerce").sum())
-                    if is_dtf:
-                        totals_row["Rider Co-Pay"] = None
-                        totals_row["Net Forsyth Cost"] = None
-                        totals_row["Rider Share over $13"] = None
-                        totals_row["Rider Bill"] = None
-                        # NEW: sum Rider Bill across the group
-                        rider_bill_total = pd.to_numeric(group_df.get("Rider Bill"), errors="coerce").sum(min_count=1)
-                        totals_row["Total Rider Cost Bill"] = round(rider_bill_total, 2) if pd.notna(rider_bill_total) else None
-                    all_rows.append(totals_row)
-    
-                    spacer_row = {col: None for col in group_df.columns}
-                    if is_dtf:
-                        spacer_row["Rider Co-Pay"] = None
-                        spacer_row["Net Forsyth Cost"] = None
-                        spacer_row["Rider Share over $13"] = None
-                        spacer_row["Rider Bill"] = None
-                        spacer_row["Total Rider Cost Bill"] = None  # NEW
-                    all_rows.append(spacer_row)
-    
-                    group_rows = []
-    
-                # ---- user row ----
-                row = base_row.copy()
-                if is_dtf:
-                    row["Rider Co-Pay"] = None
-                    row["Net Forsyth Cost"] = None
-                    row["Rider Share over $13"] = None
-                    row["Rider Bill"] = None
-                    row["Total Rider Cost Bill"] = None  # NEW (only totals row gets a value)
-    
-                    tx_type = str(row.get("Transaction Type", "")).upper().strip()
-                    if tx_type not in {"CANCELED", "DRIVER_CANCELED"}:
-                        fares_val = pd.to_numeric(row.get("Fares Only"), errors="coerce")
-                        if pd.notna(fares_val):
-                            fares_val = abs(fares_val)  # treat negatives as positive
-    
-                            # Co-pay
-                            row["Rider Co-Pay"] = 5.00
-    
-                            # Net Forsyth Cost (2 decimals)
-                            net = round(fares_val - 5.00, 2)
-                            row["Net Forsyth Cost"] = net
-    
-                            # Rider Share over $13 shown only if Fares Only > 13
-                            if fares_val > 13:
-                                rider_share = round(max(net - 13.00, 0.0), 2)
-                                row["Rider Share over $13"] = rider_share
-                                # Rider Bill = Rider Share over $13 + 5.00
-                                row["Rider Bill"] = round(rider_share + 5.00, 2)
-                            else:
-                                row["Rider Share over $13"] = None
-                                row["Rider Bill"] = None
-    
-                group_rows.append(row)
-                current_key = group_key
-    
-                if is_last_row:
-                    group_df = pd.DataFrame(group_rows)
-                    group_df["Trips Count"] = 1
-                    all_rows.extend(group_df.to_dict(orient="records"))
-    
-                    transaction_col = next((col for col in ["Transaction Amount",
-                                                            "Transaction Amount in Local Currency (incl. Taxes)"]
-                                            if col in group_df.columns), None)
-                    total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
-    
-                    totals_row = {col: None for col in group_df.columns}
-                    totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
-                    totals_row["Trips Count"] = int(pd.to_numeric(group_df["Trips Count"], errors="coerce").sum())
-                    if is_dtf:
-                        totals_row["Rider Co-Pay"] = None
-                        totals_row["Net Forsyth Cost"] = None
-                        totals_row["Rider Share over $13"] = None
-                        totals_row["Rider Bill"] = None
-                        # NEW: sum Rider Bill across the group
-                        rider_bill_total = pd.to_numeric(group_df.get("Rider Bill"), errors="coerce").sum(min_count=1)
-                        totals_row["Total Rider Cost Bill"] = round(rider_bill_total, 2) if pd.notna(rider_bill_total) else None
-                    all_rows.append(totals_row)
-    
-                    spacer_row = {col: None for col in group_df.columns}
-                    if is_dtf:
-                        spacer_row["Rider Co-Pay"] = None
-                        spacer_row["Net Forsyth Cost"] = None
-                        spacer_row["Rider Share over $13"] = None
-                        spacer_row["Rider Bill"] = None
-                        spacer_row["Total Rider Cost Bill"] = None  # NEW
-                    all_rows.append(spacer_row)
-    
-            final_df = pd.DataFrame(all_rows)
-    
-            # Ensure numeric dtypes
-            for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)",
-                        "Fares Only", "Trips Count", "Rider Co-Pay", "Net Forsyth Cost",
-                        "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]:  # NEW
-                if col in final_df.columns:
-                    final_df[col] = pd.to_numeric(final_df[col], errors="coerce")
-    
-            # Keep the DTF extras as the last columns (now 5)
-            if is_dtf:
-                for tail_col in ["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]:  # NEW
-                    if tail_col not in final_df.columns:
-                        final_df[tail_col] = None
-                cols = [c for c in final_df.columns if c not in ["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]]
-                cols.extend(["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"])  # NEW
-                final_df = final_df[cols]
-    
-            # Grand total for Fares Only (unchanged)
-            if "Fares Only" in final_df.columns:
-                fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
-                grand_total_row = {col: None for col in final_df.columns}
-                grand_total_row["Fares Only"] = round(fares_total, 2)
-                final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
-    
-            output = BytesIO()
-            final_df.to_excel(output, index=False)
-            output.seek(0)
-            return final_df, output
+        all_rows = []
+        group_rows = []
+        current_key = None
 
-    # Export known internal notes
+        for i in range(len(df_note)):
+            base_row = df_note.iloc[i]
+            group_key = (base_row['Passenger Number'], base_row['Last Name'], base_row['First Name'])
+            is_last_row = (i == len(df_note) - 1)
+
+            if current_key is None:
+                current_key = group_key
+
+            if group_key != current_key:
+                group_df = pd.DataFrame(group_rows)
+                group_df["Trips Count"] = 1
+                all_rows.extend(group_df.to_dict(orient="records"))
+
+                transaction_col = next((col for col in ["Transaction Amount",
+                                                        "Transaction Amount in Local Currency (incl. Taxes)"]
+                                        if col in group_df.columns), None)
+                total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
+
+                totals_row = {col: None for col in group_df.columns}
+                totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
+                totals_row["Trips Count"] = int(pd.to_numeric(group_df["Trips Count"], errors="coerce").sum())
+                if is_dtf:
+                    totals_row["Rider Co-Pay"] = None
+                    totals_row["Net Forsyth Cost"] = None
+                    totals_row["Rider Share over $13"] = None
+                    totals_row["Rider Bill"] = None
+                    rider_bill_total = pd.to_numeric(group_df.get("Rider Bill"), errors="coerce").sum(min_count=1)
+                    totals_row["Total Rider Cost Bill"] = round(rider_bill_total, 2) if pd.notna(rider_bill_total) else None
+                all_rows.append(totals_row)
+
+                spacer_row = {col: None for col in group_df.columns}
+                if is_dtf:
+                    spacer_row["Rider Co-Pay"] = None
+                    spacer_row["Net Forsyth Cost"] = None
+                    spacer_row["Rider Share over $13"] = None
+                    spacer_row["Rider Bill"] = None
+                    spacer_row["Total Rider Cost Bill"] = None
+                all_rows.append(spacer_row)
+
+                group_rows = []
+
+            # ---- user row ----
+            row = base_row.copy()
+            if is_dtf:
+                row["Rider Co-Pay"] = None
+                row["Net Forsyth Cost"] = None
+                row["Rider Share over $13"] = None
+                row["Rider Bill"] = None
+                row["Total Rider Cost Bill"] = None  # only totals row gets a value
+
+                tx_type = str(row.get("Transaction Type", "")).upper().strip()
+                fares_val = pd.to_numeric(row.get("Fares Only"), errors="coerce")
+                ta_val = pd.to_numeric(row.get("Transaction Amount"), errors="coerce")
+
+                # Negative Transaction Amount override
+                if pd.notna(ta_val) and ta_val < 0:
+                    row["Rider Co-Pay"] = 0.00
+                    row["Net Forsyth Cost"] = 0.00
+                    row["Rider Share over $13"] = 0.00
+                    row["Rider Bill"] = ta_val  # keep the negative value
+                elif tx_type in {"CANCEL", "DRIVER_CANCELED", "CANCELED"}:
+                    if pd.notna(fares_val):
+                        row["Net Forsyth Cost"] = abs(fares_val)
+                else:
+                    if pd.notna(fares_val):
+                        fares_val = abs(fares_val)
+
+                        # Co-pay
+                        row["Rider Co-Pay"] = 5.00
+
+                        # Net before cap; display Net Forsyth Cost capped at 13.00
+                        net_before_cap = round(fares_val - 5.00, 2)
+                        row["Net Forsyth Cost"] = 13.00 if net_before_cap > 13.00 else net_before_cap
+
+                        # Rider Share over $13 based on *uncapped* net
+                        if fares_val > 13:
+                            rider_share = round(max(net_before_cap - 13.00, 0.0), 2)
+                            row["Rider Share over $13"] = rider_share
+                            row["Rider Bill"] = round(rider_share + 5.00, 2)
+                        else:
+                            row["Rider Share over $13"] = None
+                            row["Rider Bill"] = 5.00
+
+            group_rows.append(row)
+            current_key = group_key
+
+            if is_last_row:
+                group_df = pd.DataFrame(group_rows)
+                group_df["Trips Count"] = 1
+                all_rows.extend(group_df.to_dict(orient="records"))
+
+                transaction_col = next((col for col in ["Transaction Amount",
+                                                        "Transaction Amount in Local Currency (incl. Taxes)"]
+                                        if col in group_df.columns), None)
+                total_transaction = pd.to_numeric(group_df[transaction_col], errors="coerce").sum() if transaction_col else 0
+
+                totals_row = {col: None for col in group_df.columns}
+                totals_row[transaction_col or "Transaction Amount"] = round(total_transaction, 2)
+                totals_row["Trips Count"] = int(pd.to_numeric(group_df["Trips Count"], errors="coerce").sum())
+                if is_dtf:
+                    totals_row["Rider Co-Pay"] = None
+                    totals_row["Net Forsyth Cost"] = None
+                    totals_row["Rider Share over $13"] = None
+                    totals_row["Rider Bill"] = None
+                    rider_bill_total = pd.to_numeric(group_df.get("Rider Bill"), errors="coerce").sum(min_count=1)
+                    totals_row["Total Rider Cost Bill"] = round(rider_bill_total, 2) if pd.notna(rider_bill_total) else None
+                all_rows.append(totals_row)
+
+                spacer_row = {col: None for col in group_df.columns}
+                if is_dtf:
+                    spacer_row["Rider Co-Pay"] = None
+                    spacer_row["Net Forsyth Cost"] = None
+                    spacer_row["Rider Share over $13"] = None
+                    spacer_row["Rider Bill"] = None
+                    spacer_row["Total Rider Cost Bill"] = None
+                all_rows.append(spacer_row)
+
+        final_df = pd.DataFrame(all_rows)
+
+        # Ensure numeric dtypes
+        for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)",
+                    "Fares Only", "Trips Count", "Rider Co-Pay", "Net Forsyth Cost",
+                    "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]:
+            if col in final_df.columns:
+                final_df[col] = pd.to_numeric(final_df[col], errors="coerce")
+
+        # Keep the DTF extras as the last columns (now 5)
+        if is_dtf:
+            for tail_col in ["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]:
+                if tail_col not in final_df.columns:
+                    final_df[tail_col] = None
+            cols = [c for c in final_df.columns if c not in ["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"]]
+            cols.extend(["Rider Co-Pay", "Net Forsyth Cost", "Rider Share over $13", "Rider Bill", "Total Rider Cost Bill"])
+            final_df = final_df[cols]
+
+        # Grand total for Fares Only (unchanged)
+        if "Fares Only" in final_df.columns:
+            fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+            grand_total_row = {col: None for col in final_df.columns}
+            grand_total_row["Fares Only"] = round(fares_total, 2)
+            final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+
+        output = BytesIO()
+        final_df.to_excel(output, index=False)
+        output.seek(0)
+        return final_df, output
+
+    # --- Exports ---
+
+    # DTF combined (DTF + DTFCE)
+    if not df_dtf.empty:
+        split_files["DTF"] = group_and_export(df_dtf, is_dtf=True)
+
+    # Other known internal notes (skip DTF / DTFCE to avoid duplicate files)
     for note in internal_note_values:
+        if str(note).strip().upper() in {"DTF", "DTFCE"}:
+            continue
         df_note = known_df[known_df['Internal Note'] == note].copy()
         if df_note.empty:
             continue
-        split_files[note] = group_and_export(df_note, is_dtf=(note == "DTF"))
+        split_files[note] = group_and_export(df_note, is_dtf=False)
 
-    # Export unknown notes
+    # Unknown notes -> single "Other_report"
     if not other_df.empty:
         split_files["Other_report"] = group_and_export(other_df, is_dtf=False)
 
