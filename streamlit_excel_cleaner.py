@@ -831,7 +831,7 @@ def split_by_internal_note(df):
 
     # DTF combined (DTF + DTFCE)
     if not df_dtf.empty:
-        split_files["DTF"] = group_and_export(df_dtf, is_dtf=True)
+        split_files["Forsyth"] = group_and_export(df_dtf, is_dtf=True)
 
     # Other known internal notes (skip DTF / DTFCE to avoid duplicate files)
     for note in internal_note_values:
