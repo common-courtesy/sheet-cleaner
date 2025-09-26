@@ -884,41 +884,50 @@ if uploaded_file1 and uploaded_file2:
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         href = f"data:{mime};base64,{b64}"
 
-        # Success banner WITH right-aligned download button inside
         st.markdown(f"""
         <div class="success-banner">
-          <div class="success-text">✅ Files merged successfully!</div>
-          <a class="success-download" href="{href}" download="merged_report.xlsx">📥 Download Merged Files</a>
+        <div class="success-text">✅ Files merged successfully!</div>
+        <a class="success-download" href="{href}" download="merged_report.xlsx">📥 Download Merged Files</a>
         </div>
         <style>
-          .success-banner {{
+        .success-banner {{
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 16px;
             margin: 10px 0 18px 0;
             padding: 12px 16px;
-            background: #78AB80;               /* Bootstrap-ish success green */
+            background: #78AB80;
             color: #155724;
             border: 1px solid #c3e6cb;
             border-radius: 10px;
-          }}
-          .success-text {{
+        }}
+        .success-text {{
             font-weight: 600;
-          }}
-          .success-download {{
-            text-decoration: none;
+        }}
+
+        /* Stronger overrides for Streamlit's link styles */
+        .success-banner .success-download,
+        .success-banner .success-download:link,
+        .success-banner .success-download:visited {{
+            display: inline-block;
+            text-decoration: none !important;
             font-weight: 600;
             padding: 8px 12px;
             border-radius: 8px;
-            border: 1px solid #155724;
-            background: #ffffff;
-            color: #155724;
+            border: 1px solid #FFF;
+            background: rgba(255, 255, 255, 0.3);
+            color: #243824 !important;
             white-space: nowrap;
-          }}
-          .success-download:hover {{
-            filter: brightness(0.98);
-          }}
+        }}
+        .success-banner .success-download:hover {{
+            background: rgba(255, 255, 255, 0.5);
+            color: #243824 !important;
+        }}
+        .success-banner .success-download:focus {{
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.6);
+        }}
         </style>
         """, unsafe_allow_html=True)
 
