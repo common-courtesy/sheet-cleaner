@@ -349,7 +349,7 @@ st.set_page_config(page_title="Monthly Report Tool", layout="centered")
 st.title("📊 Monthly Report Tool")
 
 # --- County highlighter ---
-county = st.selectbox("County highlight", ["None", "Fulton", "Forsyth"], index=0)
+county = st.selectbox("Please select a chapter", ["All", "Fulton", "Forsyth"], index=0)
 
 def highlight_rows(df, county_choice):
     if county_choice == "None" or df is None or "Internal Note" not in df.columns:
@@ -869,18 +869,7 @@ def split_by_internal_note(df):
 # --- Combine Two Files Section (UI) ---
 st.markdown("#### 📎 Combine Two Filtered Files & Split by Internal Notes")
 
-# Placeholder button directly under header (disabled until merge)
-btn_slot = st.empty()
-btn_slot.download_button(
-    label="📥 Download Merged File",
-    data=b"",  # placeholder
-    file_name="merged_report.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    disabled=True,
-    help="Upload both files to enable"
-)
-
-# Uploaders live under the (currently disabled) button
+# Uploaders
 uploaded_file1 = st.file_uploader("Upload your first .xlsx or .csv file", type=["xlsx", "csv"], key="file1")
 uploaded_file2 = st.file_uploader("Upload your second .xlsx or .csv file", type=["xlsx", "csv"], key="file2")
 
@@ -889,17 +878,52 @@ if uploaded_file1 and uploaded_file2:
         with st.spinner("🟡 Merging files..."):
             df, output = sort_and_merge(uploaded_file1, uploaded_file2)
 
-        st.success("✅ Files merged successfully!")
-        st.dataframe(df.head(50))
+        # Build data URL for inline download button
+        import base64
+        b64 = base64.b64encode(output.getvalue()).decode()
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        href = f"data:{mime};base64,{b64}"
 
-        # Swap disabled button for a real download button
-        btn_slot.download_button(
-            label="📥 Download Merged File",
-            data=output,
-            file_name="merged_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            disabled=False
-        )
+        # Success banner WITH right-aligned download button inside
+        st.markdown(f"""
+        <div class="success-banner">
+          <div class="success-text">✅ Files merged successfully!</div>
+          <a class="success-download" href="{href}" download="merged_report.xlsx">📥 Download Merged Files</a>
+        </div>
+        <style>
+          .success-banner {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin: 10px 0 18px 0;
+            padding: 12px 16px;
+            background: #78AB80;               /* Bootstrap-ish success green */
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 10px;
+          }}
+          .success-text {{
+            font-weight: 600;
+          }}
+          .success-download {{
+            text-decoration: none;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #155724;
+            background: #ffffff;
+            color: #155724;
+            white-space: nowrap;
+          }}
+          .success-download:hover {{
+            filter: brightness(0.98);
+          }}
+        </style>
+        """, unsafe_allow_html=True)
+
+        # Preview
+        st.dataframe(df.head(50))
 
         # Split by note
         st.markdown("### 🔍 Download Split Files by Internal Note")
@@ -927,5 +951,6 @@ if uploaded_file1 and uploaded_file2:
                     shown = True
             if not shown:
                 st.info("No files found for the selected county.")
+
     except Exception as e:
         st.error(f"❌ Merge failed: {e}")
