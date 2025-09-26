@@ -915,7 +915,6 @@ if uploaded_file1 and uploaded_file2:
             font-weight: 600;
             padding: 8px 12px;
             border-radius: 8px;
-            border: 1px solid #FFF;
             background: rgba(255, 255, 255, 0.3);
             color: #243824 !important;
             white-space: nowrap;
