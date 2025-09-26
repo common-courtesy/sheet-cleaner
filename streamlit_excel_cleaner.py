@@ -347,6 +347,32 @@ def clean_file(uploaded_file):
 # --- Streamlit UI ---
 st.set_page_config(page_title="Monthly Report Tool", layout="centered")
 st.title("📊 Monthly Report Tool")
+
+# --- County highlighter ---
+county = st.selectbox("County highlight", ["None", "Fulton", "Forsyth"], index=0)
+
+def highlight_rows(df, county_choice):
+    if county_choice == "None" or df is None or "Internal Note" not in df.columns:
+        return df
+    note_sets = {
+        "Fulton": {"FCC", "FCM", "FCSH", "FCSC"},
+        "Forsyth": {"DTF", "DTFCE"},
+    }
+    target = note_sets.get(county_choice, set())
+
+    def _row_style(row):
+        note = str(row.get("Internal Note", "")).strip().upper()
+        if note in target:
+            # light yellow highlight
+            return ["background-color: #FFF9C4"] * len(row)
+        return [""] * len(row)
+
+    try:
+        return df.style.apply(_row_style, axis=1)
+    except Exception:
+        # If Styler not supported in the current Streamlit version, fall back to raw df
+        return df
+
 st.markdown("Upload your Excel or CSV file to clean and summarize your data.")
 
 uploaded_file = st.file_uploader("Upload .xlsx or .csv file", type=["xlsx", "csv"])
@@ -365,17 +391,6 @@ if uploaded_file:
             file_name="cleaned_report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-# --- Visual Divider ---
-st.markdown("""
-<hr style="border: none; border-top: 2px dashed #bbb; margin: 40px 0;">
-""", unsafe_allow_html=True)
-
-# --- Combine Two Files Section ---
-st.markdown("#### 📎 Combine Two Filtered Files & Split by Internal Notes")
-
-uploaded_file1 = st.file_uploader("Upload your first .xlsx or .csv file", type=["xlsx", "csv"], key="file1")
-uploaded_file2 = st.file_uploader("Upload your second .xlsx or .csv file", type=["xlsx", "csv"], key="file2")
 
 def sort_and_merge(file1_path, file2_path):
     import pandas as pd
@@ -587,6 +602,13 @@ def sort_and_merge(file1_path, file2_path):
     return final_df, output
 
 def split_by_internal_note(df):
+    """
+    Exports grouped files:
+      - "Forsyth": DTF + DTFCE (with Forsyth billing columns)
+      - "Fulton":  FCC + FCM + FCSH + FCSC (combined)
+      - "Other_report": any other non-empty Internal Note values
+    Returns: dict[str, tuple[pd.DataFrame, BytesIO]]
+    """
     split_files = {}
 
     if 'Internal Note' not in df.columns:
@@ -600,20 +622,20 @@ def split_by_internal_note(df):
     # Case-insensitive notes
     norm_notes = df['Internal Note'].astype(str).str.strip().str.upper()
 
-    # 1) Build the combined DTF dataset (DTF + DTFCE)
-    dtf_notes = {"DTF", "DTFCE"}
-    dtf_mask = norm_notes.isin(dtf_notes)
-    df_dtf = df[dtf_mask].copy()
+    # Note groups
+    forsyth_notes = {"DTF", "DTFCE"}
+    fulton_notes  = {"FCC", "FCM", "FCSH", "FCSC"}
 
-    # 2) Work on the remaining rows for normal per-note exports
-    remaining = df[~dtf_mask].copy()
-    remaining_norm = remaining['Internal Note'].astype(str).str.strip().str.upper()
+    # Split datasets
+    dtf_mask = norm_notes.isin(forsyth_notes)
+    df_forsyth = df[dtf_mask].copy()
+    df_fulton  = df[norm_notes.isin(fulton_notes)].copy()
 
-    known_df = remaining[remaining_norm.isin([v.upper() for v in internal_note_values])]
+    # Remaining = anything not Forsyth or Fulton but still has a note
+    remaining = df[~norm_notes.isin(forsyth_notes.union(fulton_notes))].copy()
     other_df = remaining[
-        ~remaining_norm.isin([v.upper() for v in internal_note_values])
-        & remaining['Internal Note'].notna()
-        & (remaining['Internal Note'].astype(str).str.strip() != "")
+        remaining['Internal Note'].notna() &
+        (remaining['Internal Note'].astype(str).str.strip() != "")
     ]
 
     def group_and_export(df_note, is_dtf=False):
@@ -819,10 +841,12 @@ def split_by_internal_note(df):
                 "TOTAL Rider Cost Rider Bill",
                 "TOTAL Forsyth Bill",
             ]
-            for col_name in [c for c in currency_cols if c]:
+            
+            for col_name in [c for c in currency_cols if c and c in final_df.columns]:
                 col_idx = final_df.columns.get_loc(col_name) + 1
                 for r in range(2, len(final_df) + 2):
                     ws.cell(row=r, column=col_idx).number_format = '"$"#,##0.00'
+
 
         output.seek(0)
         return final_df, output
@@ -830,52 +854,78 @@ def split_by_internal_note(df):
     # --- Exports ---
 
     # DTF combined (DTF + DTFCE)
-    if not df_dtf.empty:
-        split_files["Forsyth"] = group_and_export(df_dtf, is_dtf=True)
+    if not df_forsyth.empty:
+        split_files["Forsyth"] = group_and_export(df_forsyth, is_dtf=True)
 
-    # Other known internal notes (skip DTF / DTFCE to avoid duplicate files)
-    for note in internal_note_values:
-        if str(note).strip().upper() in {"DTF", "DTFCE"}:
-            continue
-        df_note = known_df[known_df['Internal Note'] == note].copy()
-        if df_note.empty:
-            continue
-        split_files[note] = group_and_export(df_note, is_dtf=False)
+    if not df_fulton.empty:
+        split_files["Fulton"] = group_and_export(df_fulton, is_dtf=False)
 
-    # Unknown notes -> single "Other_report"
     if not other_df.empty:
         split_files["Other_report"] = group_and_export(other_df, is_dtf=False)
 
     return split_files
 
+
+# --- Combine Two Files Section (UI) ---
+st.markdown("#### 📎 Combine Two Filtered Files & Split by Internal Notes")
+
+# Placeholder button directly under header (disabled until merge)
+btn_slot = st.empty()
+btn_slot.download_button(
+    label="📥 Download Merged File",
+    data=b"",  # placeholder
+    file_name="merged_report.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    disabled=True,
+    help="Upload both files to enable"
+)
+
+# Uploaders live under the (currently disabled) button
+uploaded_file1 = st.file_uploader("Upload your first .xlsx or .csv file", type=["xlsx", "csv"], key="file1")
+uploaded_file2 = st.file_uploader("Upload your second .xlsx or .csv file", type=["xlsx", "csv"], key="file2")
+
 if uploaded_file1 and uploaded_file2:
     try:
-        st.info("🟡 Merging files...")
-        df, output = sort_and_merge(uploaded_file1, uploaded_file2)
-        st.success("✅ Files merged successfully!")
-        st.dataframe(df.head(50))  # Show preview
+        with st.spinner("🟡 Merging files..."):
+            df, output = sort_and_merge(uploaded_file1, uploaded_file2)
 
-        st.download_button(
-            "📥 Download Merged File",
-            output,
+        st.success("✅ Files merged successfully!")
+        st.dataframe(df.head(50))
+
+        # Swap disabled button for a real download button
+        btn_slot.download_button(
+            label="📥 Download Merged File",
+            data=output,
             file_name="merged_report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=False
         )
 
-        # Split by Internal Note
+        # Split by note
         st.markdown("### 🔍 Download Split Files by Internal Note")
-
         split_files = split_by_internal_note(df)
         if not split_files:
             st.warning("⚠️ Could not find 'Internal Note' column to split by.")
         else:
-            for note, (df_note, buffer) in split_files.items():
-                st.download_button(
-                    label=f"📂 Download {note}.xlsx",
-                    data=buffer,  # use the BytesIO, not the (df, buffer) tuple
-                    file_name=f"{note}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
+            if county == "Forsyth":
+                keys_to_show = ["Forsyth"]
+            elif county == "Fulton":
+                keys_to_show = ["Fulton"]
+            else:
+                keys_to_show = list(split_files.keys())
 
+            shown = False
+            for key in keys_to_show:
+                if key in split_files:
+                    df_note, buffer = split_files[key]
+                    st.download_button(
+                        label=f"📂 Download {key}.xlsx",
+                        data=buffer,
+                        file_name=f"{key}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    shown = True
+            if not shown:
+                st.info("No files found for the selected county.")
     except Exception as e:
         st.error(f"❌ Merge failed: {e}")
