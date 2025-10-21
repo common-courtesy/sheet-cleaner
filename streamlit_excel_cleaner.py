@@ -875,90 +875,129 @@ uploaded_file2 = st.file_uploader("Upload your second .xlsx or .csv file", type=
 
 if uploaded_file1 and uploaded_file2:
     try:
-        with st.spinner("🟡 Merging files..."):
-            df, output = sort_and_merge(uploaded_file1, uploaded_file2)
+        # placeholders for UI we'll render AFTER the work is done
+        ph_table  = st.empty()
+        ph_btn    = st.empty()
+        ph_head   = st.empty()
+        ph_splits = st.empty()
 
-        # Build data URL for inline download button
-        import base64
-        b64 = base64.b64encode(output.getvalue()).decode()
-        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        href = f"data:{mime};base64,{b64}"
+        # ---- Build labels based on dropdown ----
+        if county == "Forsyth":
+            split_label = "Forsyth files"
+            heading = "### 📂 Download Forsyth files"
+        elif county == "Fulton":
+            split_label = "Fulton files"
+            heading = "### 📂 Download Fulton files"
+        else:
+            split_label = "Forsyth, Fulton, and other files"
+            heading = "### 📂 Download Forsyth, Fulton, and other files"
 
-        st.markdown(f"""
-        <div class="success-banner">
-        <div class="success-text">✅ Files merged successfully!</div>
-        <a class="success-download" href="{href}" download="merged_report.xlsx">📥 Download Merged Files</a>
-        </div>
+        # ---------- ONE loader (auto-dismiss) ----------
+        ph_status = st.empty()  # host the loader temporarily
+
+        try:
+            # Use st.status when available
+            with ph_status.container():
+                with st.status("🟡 Processing files…", expanded=True) as s:
+                    s.write("Merging files…")
+                    df, output = sort_and_merge(uploaded_file1, uploaded_file2)
+
+                    s.write(f"Generating {split_label}…")   # <-- dynamic text
+                    split_files = split_by_internal_note(df)
+
+                    s.update(label="✅ Files ready", state="complete", expanded=False)
+        except Exception:
+            # Fallback for older Streamlit versions that don't have st.status
+            with ph_status.container():
+                with st.spinner(f"🟡 Processing files (merge + {split_label})…"):  # <-- dynamic text
+                    df, output = sort_and_merge(uploaded_file1, uploaded_file2)
+                    split_files = split_by_internal_note(df)
+
+        # remove the status/loader from the page
+        ph_status.empty()
+        # ---------- end loader ----------
+
+        # ----- render UI only after everything is ready -----
+        ph_table.dataframe(df.head(50))
+
+        # keep merged button one-line
+        st.markdown("""
         <style>
-        .success-banner {{
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            margin: 10px 0 18px 0;
-            padding: 12px 16px;
-            background: #78AB80;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            border-radius: 10px;
-        }}
-        .success-text {{
-            font-weight: 600;
-        }}
-
-        /* Stronger overrides for Streamlit's link styles */
-        .success-banner .success-download,
-        .success-banner .success-download:link,
-        .success-banner .success-download:visited {{
-            display: inline-block;
-            text-decoration: none !important;
-            font-weight: 600;
-            padding: 8px 12px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.3);
-            color: #243824 !important;
-            white-space: nowrap;
-        }}
-        .success-banner .success-download:hover {{
-            background: rgba(255, 255, 255, 0.5);
-            color: #243824 !important;
-        }}
-        .success-banner .success-download:focus {{
-            outline: none;
-            box-shadow: 0 0 0 2px rgba(255,255,255,0.6);
-        }}
+        #download_merged_files_button button{display:inline-flex;flex-direction:row;align-items:center;gap:.5rem;white-space:nowrap;}
+        #download_merged_files_button button p{display:inline;margin:0;white-space:nowrap;}
         </style>
         """, unsafe_allow_html=True)
 
-        # Preview
-        st.dataframe(df.head(50))
+        # right-align merged button
+        with ph_btn.container():
+            spacer, right = st.columns([1, 0.42])
+            with right:
+                st.download_button(
+                    label="📥 Download Merged Files",
+                    data=output.getvalue(),
+                    file_name="merged_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_merged_files_button",
+                )
 
-        # Split by note
-        st.markdown("### 🔍 Download Split Files by Internal Note")
-        split_files = split_by_internal_note(df)
-        if not split_files:
-            st.warning("⚠️ Could not find 'Internal Note' column to split by.")
-        else:
-            if county == "Forsyth":
-                keys_to_show = ["Forsyth"]
-            elif county == "Fulton":
-                keys_to_show = ["Fulton"]
+        # dynamic heading (same text used by loader)
+        ph_head.markdown(heading)
+
+        # split buttons (yellow only for these)
+        with ph_splits.container():
+            if not split_files:
+                st.warning("⚠️ Could not find 'Internal Note' column to split by.")
             else:
-                keys_to_show = list(split_files.keys())
+                if county == "Forsyth":
+                    keys_to_show = ["Forsyth"]
+                elif county == "Fulton":
+                    keys_to_show = ["Fulton"]
+                else:
+                    keys_to_show = list(split_files.keys())
 
-            shown = False
-            for key in keys_to_show:
-                if key in split_files:
-                    df_note, buffer = split_files[key]
-                    st.download_button(
-                        label=f"📂 Download {key}.xlsx",
-                        data=buffer,
-                        file_name=f"{key}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                    shown = True
-            if not shown:
-                st.info("No files found for the selected county.")
+                shown = False
+                for key in keys_to_show:
+                    if key in split_files:
+                        df_note, buffer = split_files[key]
+                        st.download_button(
+                            label=f"📂 Download {key}.xlsx",
+                            data=buffer,
+                            file_name=f"{key}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key=f"download_{key.lower()}_btn",
+                        )
+                        shown = True
+                if not shown:
+                    st.info("No files found for the selected county.")
+
+            # style only Forsyth/Fulton/Other buttons
+            st.markdown("""
+            <style>
+            #download_merged_files_button button,
+            #download_forsyth_btn button,
+            #download_fulton_btn button,
+            #download_other_report_btn button{
+            width:100%;
+            background:#FFE34D !important;   /* yellow */
+            color:#000 !important;            /* black text */
+            border:1px solid rgba(0,0,0,0.25);
+            border-radius:10px;
+            }
+            #download_merged_files_button button:hover,
+            #download_forsyth_btn button:hover,
+            #download_fulton_btn button:hover,
+            #download_other_report_btn button:hover{ filter:brightness(0.95); }
+            #download_merged_files_button button:active,
+            #download_forsyth_btn button:active,
+            #download_fulton_btn button:active,
+            #download_other_report_btn button:active{ filter:brightness(0.90); }
+            </style>
+            """, unsafe_allow_html=True)
+
 
     except Exception as e:
-        st.error(f"❌ Merge failed: {e}")
+        # make sure any lingering loader is removed on error
+        try: ph_status.empty()
+        except: pass
+        st.error(f"❌ Processing failed: {e}")
