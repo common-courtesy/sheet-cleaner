@@ -495,7 +495,7 @@ if uploaded_file:
     else:
         print("🧪 Shape after filtering:", cleaned_df.shape)
         st.success("✅ File cleaned successfully!")
-        ph_table.dataframe(safe_for_streamlit_df(df.head(50)))
+        st.dataframe(safe_for_streamlit_df(cleaned_df.head(50)))  
         
         st.download_button(
             "📥 Download Cleaned File",
