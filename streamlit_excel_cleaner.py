@@ -80,6 +80,71 @@ def detect_header(uploaded_file):
         uploaded_file.seek(0)
     return None
 
+def load_headerless_uber_lyft(file_obj):
+    """
+    Reads a CSV/XLSX *without headers* and assigns Uber vs Lyft headers,
+    then returns the standardized cleaned df (via clean_file_without_headers()).
+    Returns: pd.DataFrame | None
+    """
+    # Try CSV headerless first
+    if file_obj.name.endswith(".csv"):
+        file_obj.seek(0)
+        df_raw = pd.read_csv(file_obj, header=None)
+        file_obj.seek(0)
+
+        # Need enough columns to safely look at col 6
+        if df_raw.shape[1] < 7 or df_raw.shape[0] < 1:
+            return None
+
+        first_value = str(df_raw.iloc[0, 6])
+
+        # Your existing heuristic:
+        # - if col 6 has NO digits -> Uber
+        # - else -> Lyft
+        if not any(ch.isdigit() for ch in first_value):
+            # Uber
+            if df_raw.shape[1] >= len(expected_headers_uber):
+                df_raw = df_raw.iloc[:, :len(expected_headers_uber)]
+            df_raw.columns = expected_headers_uber[: df_raw.shape[1]]
+        else:
+            # Lyft
+            if df_raw.shape[1] >= len(expected_headers_lyft):
+                df_raw = df_raw.iloc[:, :len(expected_headers_lyft)]
+            df_raw.columns = expected_headers_lyft[: df_raw.shape[1]]
+
+        df_raw.columns = pd.Index([str(c).replace("\ufeff", "").strip() for c in df_raw.columns])
+        return clean_file_without_headers(df_raw)
+
+    # XLSX headerless (rare, but handle it)
+    if file_obj.name.endswith(".xlsx"):
+        import tempfile
+
+        file_obj.seek(0)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(file_obj.read())
+            tmp_path = tmp.name
+
+        df_raw = pd.read_excel(tmp_path, header=None)
+
+        if df_raw.shape[1] < 7 or df_raw.shape[0] < 1:
+            return None
+
+        first_value = str(df_raw.iloc[0, 6])
+
+        if not any(ch.isdigit() for ch in first_value):
+            if df_raw.shape[1] >= len(expected_headers_uber):
+                df_raw = df_raw.iloc[:, :len(expected_headers_uber)]
+            df_raw.columns = expected_headers_uber[: df_raw.shape[1]]
+        else:
+            if df_raw.shape[1] >= len(expected_headers_lyft):
+                df_raw = df_raw.iloc[:, :len(expected_headers_lyft)]
+            df_raw.columns = expected_headers_lyft[: df_raw.shape[1]]
+
+        df_raw.columns = pd.Index([str(c).replace("\ufeff", "").strip() for c in df_raw.columns])
+        return clean_file_without_headers(df_raw)
+
+    return None
+
 def clean_file_without_headers(df):
     
     # Eliminate unwanted name columns
@@ -145,12 +210,17 @@ def clean_file(uploaded_file):
         print("📏 File size (bytes):", uploaded_file.size)
 
         is_common_courtesy = False
-        
+        header_row = None  # ✅ always defined
+
         if uploaded_file.name.endswith(".csv"):
+            uploaded_file.seek(0)
             preview = pd.read_csv(uploaded_file, nrows=1, header=None)
             uploaded_file.seek(0)
-            if "Common Courtesy" in str(preview.iloc[0, 1]):
+
+            # --- Common Courtesy ---
+            if preview.shape[1] > 1 and "Common Courtesy" in str(preview.iloc[0, 1]):
                 header_row = detect_header(uploaded_file)
+
                 if header_row is not None:
                     uploaded_file.seek(0)
                     df = pd.read_csv(uploaded_file, header=header_row)
@@ -166,24 +236,42 @@ def clean_file(uploaded_file):
                 if 'Guest Last Name' in df.columns:
                     df['Last Name'] = df['Guest Last Name']
                 df.drop(columns=['Guest First Name', 'Guest Last Name'], inplace=True, errors='ignore')
+
+            # --- Normal / Headerless Uber-Lyft ---
             else:
+                uploaded_file.seek(0)
                 df = pd.read_csv(uploaded_file)
+                uploaded_file.seek(0)
+
+                # ✅ If it doesn't look like a proper header row, treat as headerless Uber/Lyft
+                if not any(col in df.columns for col in ["Last Name", "Passenger Number", "Ride ID", "Trip/Eats ID", "Internal Note", "Expense Memo"]):
+                    df = load_headerless_uber_lyft(uploaded_file)
+                    if df is None:
+                        return (None, None)
 
             df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
+
         else:
+            # xlsx
+            uploaded_file.seek(0)
             df = pd.read_excel(uploaded_file)
             df.columns = df.columns.str.replace('\ufeff', '', regex=False).str.strip()
 
-        print("📄 Header row detected at:", header_row if 'header_row' in locals() else "default (0)")
+            # ✅ If this xlsx is actually headerless Uber/Lyft, handle it
+            if not any(col in df.columns for col in ["Last Name", "Passenger Number", "Ride ID", "Trip/Eats ID", "Internal Note", "Expense Memo"]):
+                df = load_headerless_uber_lyft(uploaded_file)
+                if df is None:
+                    return (None, None)
+
+        print("📄 Header row detected at:", header_row if header_row is not None else "default (0)")
         print("🧠 Columns after cleanup:", df.columns.tolist())
         print("🧠 Are columns unique?:", df.columns.is_unique)
         print("🧪 DataFrame shape:", df.shape)
 
         # Eliminate unwanted name columns
         name_headers = ["First Name", "Last Name", "Guest First Name", "Guest Last Name"]
-
         if all(header in df.columns for header in name_headers):
-            print( 'we have detected that there are name columns that need to be deleted' )
+            print('we have detected that there are name columns that need to be deleted')
             df = df.drop(columns=["First Name", "Last Name"])
             df = df.rename(columns={
                 "Guest First Name": "First Name",
@@ -195,14 +283,19 @@ def clean_file(uploaded_file):
         missing_cols = [col for col in required_cols if col not in df.columns]
         if note_column is None:
             missing_cols.append('Internal Note or Expense Memo')
+
         if missing_cols:
-            return None
+            print("❌ Missing required cols:", missing_cols)
+            return (None, None)
 
         df_filtered = df[df[note_column].notna() & (df[note_column].astype(str).str.strip() != "")]
+
         custom_columns_to_hide = columns_to_hide.copy()
         if is_common_courtesy and "Email" in custom_columns_to_hide:
             custom_columns_to_hide.remove("Email")
+
         df_filtered = df_filtered.drop(columns=[col for col in custom_columns_to_hide if col in df_filtered.columns])
+
         if is_common_courtesy and "Transaction Type" in df_filtered.columns:
             df_filtered = df_filtered.drop(columns=["Transaction Type"])
 
@@ -221,9 +314,14 @@ def clean_file(uploaded_file):
         df_filtered = df_filtered.loc[:, ~df_filtered.columns.duplicated()]
         print("🧼 Columns after renaming:", df_filtered.columns.tolist())
 
-        df_filtered['First Name'] = df_filtered['First Name'].astype(str).str.strip()
-        df_filtered['Last Name'] = df_filtered['Last Name'].astype(str).str.strip()
-        df_filtered['Passenger Number'] = df_filtered['Passenger Number'].astype(str).str.strip()
+        # ✅ Ensure these exist before touching them (headerless paths can omit some)
+        for safe_col in ["First Name", "Last Name", "Passenger Number"]:
+            if safe_col in df_filtered.columns:
+                df_filtered[safe_col] = df_filtered[safe_col].astype(str).str.strip()
+            else:
+                # If Passenger Number is missing, make it blank to keep grouping stable
+                if safe_col == "Passenger Number":
+                    df_filtered["Passenger Number"] = ""
 
         df_filtered_sorted = df_filtered.sort_values(
             by=['Last Name', 'First Name', 'Passenger Number'],
@@ -237,10 +335,11 @@ def clean_file(uploaded_file):
 
         for i in range(len(df_values)):
             row = df_values.iloc[i]
-            group_key = (row['Passenger Number'], row['Last Name'], row['First Name'])
+            group_key = (row.get('Passenger Number', ''), row.get('Last Name', ''), row.get('First Name', ''))
             is_last_row = (i == len(df_values) - 1)
 
             transaction_col = next((col for col in ["Transaction Amount", "Transaction Amount in Local Currency (incl. Taxes)"] if col in df_values.columns), None)
+
             row = row.copy()
             row["Fares Only"] = row.get(transaction_col or "Transaction Amount", "")
 
@@ -280,31 +379,28 @@ def clean_file(uploaded_file):
 
         final_df = pd.DataFrame(all_rows)
 
-        # ✅ Add final grand total row for Fares Only
-        fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
-        grand_total_row = {col: "" for col in final_df.columns}
-        grand_total_row["Fares Only"] = round(fares_total, 2)
-        final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
+        # ✅ Add final grand total row for Fares Only (guard if missing)
+        if "Fares Only" in final_df.columns:
+            fares_total = pd.to_numeric(final_df["Fares Only"], errors="coerce").sum()
+            grand_total_row = {col: "" for col in final_df.columns}
+            grand_total_row["Fares Only"] = round(fares_total, 2)
+            final_df = pd.concat([final_df, pd.DataFrame([grand_total_row])], ignore_index=True)
 
         output = BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            # Move 'Fares Only' to the last column
             if "Fares Only" in final_df.columns:
                 final_df = final_df[[col for col in final_df.columns if col != "Fares Only"] + ["Fares Only"]]
 
             final_df.to_excel(writer, index=False, sheet_name="CleanedData")
-
-            workbook = writer.book
             worksheet = writer.sheets["CleanedData"]
 
-            # Define fills for each internal note type
             fills = {
-                "FCC": PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"),   # Light Blue
-                "FCM": PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid"),   # Light Green
-                "FCSH": PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),  # Light Yellow
-                "FCSC": PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),  # Light Orange
-                "DTF": PatternFill(start_color="E4DFEC", end_color="E4DFEC", fill_type="solid"),   # Light Purple
-                "Other": PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid"), # Light Gray
+                "FCC": PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"),
+                "FCM": PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid"),
+                "FCSH": PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
+                "FCSC": PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid"),
+                "DTF": PatternFill(start_color="E4DFEC", end_color="E4DFEC", fill_type="solid"),
+                "Other": PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid"),
             }
 
             thin_border = Border(
@@ -314,36 +410,37 @@ def clean_file(uploaded_file):
                 bottom=Side(style='thin')
             )
 
-            # Get the index of Internal Note column
             headers = [cell.value for cell in worksheet[1]]
-            note_col_idx = headers.index("Internal Note") + 1  # openpyxl is 1-based
+            if "Internal Note" in headers and "Trips Count" in headers:
+                note_col_idx = headers.index("Internal Note") + 1
 
-            for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
-                note_cell = row[note_col_idx - 1]
-                # Check if it's a summary row (Trips Count is empty)
-                trips_count_cell = row[headers.index("Trips Count")]
-                is_summary_row = not trips_count_cell.value or str(trips_count_cell.value).strip() == ""
+                for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
+                    note_cell = row[note_col_idx - 1]
+                    trips_count_cell = row[headers.index("Trips Count")]
+                    is_summary_row = not trips_count_cell.value or str(trips_count_cell.value).strip() == ""
 
-                note_value = str(note_cell.value).strip() if note_cell.value else ""
-
-                if note_value and not is_summary_row:
-                    fill = fills.get(note_value, fills["Other"])
+                    note_value = str(note_cell.value).strip() if note_cell.value else ""
+                    if note_value and not is_summary_row:
+                        fill = fills.get(note_value, fills["Other"])
+                        for cell in row:
+                            cell.fill = fill
+                            cell.border = thin_border
+                    else:
+                        for cell in row:
+                            cell.border = thin_border
+            else:
+                # If headers missing, still apply borders
+                for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row):
                     for cell in row:
-                        cell.fill = fill
                         cell.border = thin_border
-                else:
-                    for cell in row:
-                        cell.border = thin_border  # Just apply borders, no fill
-
 
         output.seek(0)
-
-        return final_df, output
+        return (final_df, output)
 
     except Exception as e:
         print("Error:", e)
-        return None
-
+        return (None, None)
+        
 # --- Streamlit UI ---
 st.set_page_config(page_title="Monthly Report Tool", layout="centered")
 st.title("📊 Monthly Report Tool")
@@ -379,9 +476,11 @@ uploaded_file = st.file_uploader("Upload .xlsx or .csv file", type=["xlsx", "csv
 
 if uploaded_file:
     cleaned_df, output = clean_file(uploaded_file)
-    print("🧪 Shape after filtering:", cleaned_df)
 
-    if cleaned_df is not None:
+    if cleaned_df is None or output is None:
+        st.error("❌ Could not clean this file. If it's Uber/Lyft without headers, upload the raw export (not a copy/paste).")
+    else:
+        print("🧪 Shape after filtering:", cleaned_df.shape)
         st.success("✅ File cleaned successfully!")
         st.dataframe(cleaned_df.head(50))
 
