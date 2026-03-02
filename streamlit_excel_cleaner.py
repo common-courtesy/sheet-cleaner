@@ -1028,9 +1028,6 @@ if uploaded_file1 and uploaded_file2:
         ph_status.empty()
         # ---------- end loader ----------
 
-        # ----- render UI only after everything is ready -----
-        ph_table.dataframe(df.head(50))
-
         # keep merged button one-line
         st.markdown("""
         <style>
