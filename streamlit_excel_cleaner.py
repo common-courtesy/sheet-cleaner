@@ -83,15 +83,15 @@ def detect_header(uploaded_file):
 def safe_for_streamlit_df(df: pd.DataFrame) -> pd.DataFrame:
     if df is None:
         return df
+
     out = df.copy()
 
-    # Convert any Arrow-backed / pandas string dtypes into plain Python object strings
+    # Force every value to be a plain Python type (kills Arrow/LargeUtf8 issues)
     for c in out.columns:
-        dt = str(out[c].dtype).lower()
-        if "string" in dt or "arrow" in dt or "pyarrow" in dt:
-            out[c] = out[c].astype(object)
+        out[c] = out[c].map(lambda x: None if pd.isna(x) else str(x) if isinstance(x, (bytes, bytearray)) else x)
 
-    return out
+    # Then force object dtype across the board (Streamlit-friendly)
+    return out.astype(object)
 
 def load_headerless_uber_lyft(file_obj):
     """
