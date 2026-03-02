@@ -80,6 +80,19 @@ def detect_header(uploaded_file):
         uploaded_file.seek(0)
     return None
 
+def safe_for_streamlit_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None:
+        return df
+    out = df.copy()
+
+    # Convert any Arrow-backed / pandas string dtypes into plain Python object strings
+    for c in out.columns:
+        dt = str(out[c].dtype).lower()
+        if "string" in dt or "arrow" in dt or "pyarrow" in dt:
+            out[c] = out[c].astype(object)
+
+    return out
+
 def load_headerless_uber_lyft(file_obj):
     """
     Reads a CSV/XLSX *without headers* and assigns Uber vs Lyft headers,
@@ -482,8 +495,8 @@ if uploaded_file:
     else:
         print("🧪 Shape after filtering:", cleaned_df.shape)
         st.success("✅ File cleaned successfully!")
-        st.dataframe(cleaned_df.head(50))
-
+        ph_table.dataframe(safe_for_streamlit_df(df.head(50)))
+        
         st.download_button(
             "📥 Download Cleaned File",
             output,
